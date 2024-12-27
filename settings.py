@@ -55,13 +55,6 @@ class SB_Preferences(bpy.types.AddonPreferences):
         description="Name of the reference layer that will be created/used to display the UVs in Aseprite",
         default="UVMap")
 
-    uv_scale:bpy.props.FloatProperty(
-        name="UV Scale",
-        description="Default resolution of the UV layer relative to the texture size",
-        default=8.0,
-        min=0.0,
-        max=50.0)
-
     uv_color: bpy.props.FloatVectorProperty(
         name="UV Color",
         description="Default color to draw the UVs with",
@@ -102,7 +95,6 @@ class SB_Preferences(bpy.types.AddonPreferences):
         box.row().prop(self, "uv_color")
 
         row = box.row()
-        row.prop(self, "uv_scale", text="Scale")
         row.prop(self, "uv_weight", text="Thickness")
         row.prop(self, "uv_aa", text="Anti-aliasing")
 

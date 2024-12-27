@@ -19,17 +19,14 @@
 # SOFTWARE.
 
 import bpy
-import bmesh
-import gpu
-import bgl
-from mathutils import Matrix
-from gpu_extras.batch import batch_for_shader
 import numpy as np
 from os import path
 
 from .messaging import encode
 from . import util
 from .addon import addon
+from .render import *
+from .uvutils import *
 
 
 COLOR_MODES = [
@@ -42,164 +39,94 @@ UV_DEST = [
     ('active', "Active Sprite", "Show UV map in the currently open documet")
 ]
 
+class SB_OT_config_offset(bpy.types.Operator):
+    bl_idname = "pribambase.config_offset"
+    bl_label = "Config sprite offset"
+    bl_description = "Move center of sprite for uv and camera"
 
-class SB_OT_send_uv(bpy.types.Operator):
-    bl_idname = "pribambase.set_uv"
-    bl_label = "Send UV"
-    bl_description = "Show UV in Aseprite"
-
-
-    destination: bpy.props.EnumProperty(
-        name="Show In",
-        description="Which document's UV map will be created/updated in aseprite",
-        items=UV_DEST,
-        default='texture')
-
-
-    size: bpy.props.IntVectorProperty(
-        name="Resolution",
-        description="The size for the created UVMap. The image is scaled to the size of the sprite",
+    offset: bpy.props.IntVectorProperty(
+        name="Offset",
+        description="Offset of sprite center in pixels",
         size=2,
-        min=1,
-        max=65535,
-        default=(1, 1))
-
-    color: bpy.props.FloatVectorProperty(
-        name="UV color",
-        description="Color to draw the UVs with",
-        size=4,
-        min=0.0,
-        max=1.0,
-        default=(0.0, 0.0, 0.0, 0.0),
-        subtype='COLOR')
-
-    weight: bpy.props.FloatProperty(
-        name="UV Thickness",
-        description="Thickness of the UV map lines at its original resolution",
-        min=0,
-        max=65535,
-        default=0)
-
+        default=(0, 0)
+    )
 
     @classmethod
     def poll(self, context):
-        return addon.connected and context.edit_object is not None or context.image_paint_object is not None
+        return context.object is not None and context.edit_image is not None
 
-
-    def list_uv(self):
-        ctx = bpy.context
-        active = ctx.object
-        lines = set()
-
-        objects = [obj for obj in ctx.selected_objects if obj.type == 'MESH']
-        if (active is not None) and (active not in objects) and (active.type == 'MESH'):
-            objects.append(ctx.object)
-
-        for obj in objects:
-
-            try:
-                bm = bmesh.from_edit_mesh(obj.data)
-                bm_created = False # freeing an editmode bmesh crashes blender
-            except: # if there's `elif`, why isn't there `exceptry`?
-                try:
-                    bm = bmesh.new()
-                    bm_created = True
-                    bm.from_mesh(obj.data)
-                except:
-                    self.report('WARNING', "UVMap drawing skipped: can't access mesh data")
-                    continue
-
-            uv = bm.loops.layers.uv.active
-
-            # get all edges
-            for face in bm.faces:
-                if not face.select:
-                    continue
-
-                for i in range(0, len(face.loops)):
-                    a = face.loops[i - 1][uv].uv.to_tuple()
-                    b = face.loops[i][uv].uv.to_tuple()
-
-                    # sorting prevents the edge from being added twice for differently directed loops
-                    # order doesn't really matter, just that there is one
-                    if a > b:
-                        a, b = b, a
-
-                    lines.add((a, b))
-
-            if bm_created:
-                bm.free()
-
-        return lines
-
-
-    def uvmap_size(self):
-        scale = addon.prefs.uv_scale
-        size = [128, 128]
-
-        if bpy.context.edit_image is not None:
-            size = bpy.context.edit_image.size
-
-        return [int(size[0] * scale), int(size[1] * scale)]
-
+    def invoke(self, context, event):
+        self.offset = context.edit_image.sb_offset
+        return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
-        w, h = self.size
+        context.edit_image.sb_offset = self.offset
+        bpy.ops.pribambase.update_uv()
+        bpy.ops.pribambase.update_camera()
+        return {"FINISHED"}
+
+class SB_OT_update_uv(bpy.types.Operator):
+    bl_idname = "pribambase.update_uv"
+    bl_label = "Update UV"
+    bl_description = "Update UV for mesh"
+
+    @classmethod
+    def poll(self, context):
+        return context.object is not None and context.edit_image is not None
+
+    def execute(self, context):
+        w, h = context.edit_image.size
+        if context.edit_object is not None:
+            bpy.ops.object.editmode_toggle()
+
+        offset_x, offset_y = context.edit_image.sb_offset
+
+        setup_uv(context.object, w, h, offset_x, offset_y)
+        bpy.ops.object.editmode_toggle()
+        return {"FINISHED"}
+
+
+class SB_OT_update_camera(bpy.types.Operator):
+    bl_idname = "pribambase.update_camera"
+    bl_label = "Update Camera"
+    bl_description = "Update Camera settings"
+
+    @classmethod
+    def poll(self, context):
+        return context.edit_image is not None
+
+    def execute(self, context):
+        w, h = context.edit_image.size
+
+        offset_x, offset_y = context.edit_image.sb_offset
+
+        setup_camera_config(context.scene.camera, w, h, offset_x, offset_y)
+        setup_render_config(context.scene.render, context.scene.eevee, w, h)
+
+        return {"FINISHED"}
+
+class SB_OT_send_render(bpy.types.Operator):
+    bl_idname = "pribambase.send_render"
+    bl_label = "Send Render"
+    bl_description = "Show Render in Aseprite"
+
+    @classmethod
+    def poll(self, context):
+        return addon.connected and context.edit_image is not None
+
+    def execute(self, context):
         source = ""
 
-        if self.destination == 'texture':
-            try:
-                source = util.image_name(context.area.spaces.active.image)
-            except:
-                self.report({"ERROR"}, "'Texture Source' only works with a file-associated texture")
-                return {'CANCELLED'}
-
-        aa = addon.prefs.uv_aa
-        weight = self.weight
-        lines = self.color[0:3] + (1.0,)
-        nbuf = np.zeros((h, w, 4), dtype=np.uint8)
-
-        offscreen = gpu.types.GPUOffScreen(w, h)
-
-        coords = [c for pt in self.list_uv() for c in pt]
-        shader = gpu.shader.from_builtin('2D_UNIFORM_COLOR')
-        batch = batch_for_shader(shader, 'LINES', {"pos": coords})
-
-        with offscreen.bind():
-            with gpu.matrix.push_pop():
-                # see explanation in https://blender.stackexchange.com/questions/153697/gpu-python-module-why-drawed-pixels-are-shifted-in-the-result-image
-                projection_matrix = Matrix.Diagonal((2.0, -2.0, 1.0))
-                projection_matrix = Matrix.Translation((-1.0, 1.0, 0.0)) @ projection_matrix.to_4x4()
-                gpu.matrix.load_projection_matrix(projection_matrix)
-
-                bgl.glEnable(bgl.GL_BLEND)
-                bgl.glBlendFunc(bgl.GL_SRC_ALPHA, bgl.GL_ONE_MINUS_SRC_ALPHA)
-                bgl.glLineWidth(weight)
-
-                if aa:
-                    bgl.glEnable(bgl.GL_BLEND)
-                    bgl.glBlendFunc(bgl.GL_SRC_ALPHA, bgl.GL_ONE_MINUS_SRC_ALPHA)
-                    bgl.glEnable(bgl.GL_LINE_SMOOTH)
-                    bgl.glHint(bgl.GL_LINE_SMOOTH_HINT, bgl.GL_NICEST)
-                else:
-                    bgl.glDisable(bgl.GL_BLEND)
-                    bgl.glDisable(bgl.GL_LINE_SMOOTH)
-                    bgl.glHint(bgl.GL_LINE_SMOOTH_HINT, bgl.GL_FASTEST)
-
-                shader.bind()
-                shader.uniform_float("color", lines)
-                batch.draw(shader)
-
-            # retrieve the texture
-            # https://blender.stackexchange.com/questions/221110/fastest-way-copying-from-bgl-buffer-to-numpy-array
-            buffer = bgl.Buffer(bgl.GL_BYTE, nbuf.shape, nbuf)
-            bgl.glReadPixels(0, 0, w, h, bgl.GL_RGBA, bgl.GL_UNSIGNED_BYTE, buffer)
+        image = get_render_image()
+        width = image.size[0]
+        height = image.size[1]
+        buf = util.get_mirrored_pixels(image)
 
         # send data
         msg = encode.uv_map(
-                size=(w, h),
+                size=(width, height),
                 sprite=source,
-                pixels=nbuf.tobytes(),
+                pixels=buf,
                 layer=addon.prefs.uv_layer,
                 opacity=int(addon.prefs.uv_color[3] * 255))
         if source:
@@ -208,19 +135,6 @@ class SB_OT_send_uv(bpy.types.Operator):
         addon.server.send(msg)
 
         return {"FINISHED"}
-
-
-    def invoke(self, context, event):
-        if tuple(self.size) == (1, 1):
-            self.size = self.uvmap_size()
-
-        if tuple(self.color) == (0.0, 0.0, 0.0, 0.0):
-            self.color = addon.prefs.uv_color
-
-        if self.weight == 0.0:
-            self.weight = addon.prefs.uv_weight
-
-        return context.window_manager.invoke_props_dialog(self)
 
 
 
@@ -443,7 +357,10 @@ class SB_MT_menu_2d(bpy.types.Menu):
         layout.operator("pribambase.edit_sprite_copy")
         layout.operator("pribambase.replace_sprite")
         layout.separator()
-        layout.operator("pribambase.set_uv", icon='UV_VERTEXSEL')
+        layout.operator("pribambase.config_offset")
+        layout.operator("pribambase.update_uv", icon='UV_VERTEXSEL')
+        layout.operator("pribambase.update_camera")
+        layout.operator("pribambase.send_render")
 
 
     def header_draw(self, context):
