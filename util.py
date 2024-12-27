@@ -88,6 +88,16 @@ def new_packed_image(name, w, h):
     os.remove(tmp)
     return img
 
+def get_mirrored_pixels(image):
+    pixels_in_row = image.size[0] * 4
+    height = image.size[1]
+    pixels = [0.0] * pixels_in_row * height
+
+    for i, p in enumerate(image.pixels):
+        row = (i // pixels_in_row)
+        pixels[(height - 1 - row) * pixels_in_row + (i % pixels_in_row)] = p
+
+    return bytearray((int(p * 255) for p in pixels))
 
 _update_image_args = None
 def update_image(w, h, name, pixels):

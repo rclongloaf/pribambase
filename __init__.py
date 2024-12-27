@@ -22,6 +22,18 @@
 import sys
 import os.path as path
 from glob import glob
+
+
+import importlib
+import pip
+
+try:
+    importlib.import_module('aiohttp')
+except ImportError:
+    pip.main(['install', 'aiohttp', '--target', (sys.exec_prefix) + '\lib\site-packages'])
+
+
+
 thirdparty = path.join(path.dirname(__file__), "thirdparty", "*.whl")
 sys.path += glob(thirdparty)
 
@@ -55,16 +67,16 @@ classes = (
 
     SB_OT_serv_start,
     SB_OT_serv_stop,
-    SB_OT_send_uv,
+    SB_OT_config_offset,
+    SB_OT_update_uv,
+    SB_OT_update_camera,
+    SB_OT_send_render,
     SB_OT_texture_list,
     SB_OT_open_sprite,
     SB_OT_new_sprite,
     SB_OT_edit_sprite,
     SB_OT_edit_sprite_copy,
     SB_OT_replace_sprite,
-    SB_OT_reference_add,
-    SB_OT_reference_reload,
-    SB_OT_reference_reload_all,
     SB_OT_update_image,
 
     SB_PT_panel_link,
@@ -86,6 +98,12 @@ def register():
     bpy.types.Scene.sb_state = bpy.props.PointerProperty(type=SB_State)
     bpy.types.Image.sb_source = bpy.props.StringProperty(name="Sprite", subtype='FILE_PATH')
     bpy.types.Image.sb_scale = bpy.props.IntProperty(name="Scale", min=1, max=50, default=1)
+    bpy.types.Image.sb_offset = bpy.props.IntVectorProperty(
+        name="Offset",
+        description="Offset of sprite center in pixels",
+        size=2,
+        default=(0, 0)
+    )
 
     try:
         editor_menus = bpy.types.IMAGE_MT_editor_menus
@@ -138,8 +156,6 @@ def start():
     global _images_hv
     _images_hv = hash(tuple(img.filepath for img in bpy.data.images))
 
-    bpy.ops.pribambase.reference_reload_all()
-
     if addon.prefs.autostart:
         addon.start_server()
 
@@ -157,8 +173,6 @@ def start():
 def sb_on_load_post(scene):
     global _images_hv
     _images_hv = hash(frozenset(img.filepath for img in bpy.data.images))
-
-    bpy.ops.pribambase.reference_reload_all()
 
     if addon.prefs.autostart:
         addon.start_server()

@@ -105,13 +105,15 @@ else
         local refLayer
         local refCel
 
+        local frame = app.activeFrame
+
         -- reuse layer
         -- in this case opacity is kept (it's convenient to change)
         for _,l in ipairs(spr.layers) do
             if l.name == name then
                 refLayer = l
-                spr:deleteCel(refLayer, 1)
-                refCel = spr:newCel(refLayer, 1)
+                spr:deleteCel(refLayer, frame)
+                refCel = spr:newCel(refLayer, frame)
                 break
             end
         end
@@ -124,7 +126,7 @@ else
             refLayer.name = name
             refLayer.opacity = opacity
             refLayer.stackIndex = #app.activeSprite.layers
-            refCel = app.activeSprite:newCel(refLayer, 1)
+            refCel = app.activeSprite:newCel(refLayer, frame)
             app.activeLayer = active
         end
 
