@@ -13,7 +13,7 @@ def setup_camera_config(camera_object, width, height, offset_x, offset_y):
     camera_object.location = (
         -offset_x / PPU,
         -distance * math.sin(angle),
-        distance * math.cos(angle) + -offset_y / PPU
+        distance * math.cos(angle) + (-offset_y / PPU) / math.sin(angle)
     )
     camera_object.rotation_euler = (angle, 0, 0)
 
