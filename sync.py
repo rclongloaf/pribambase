@@ -19,11 +19,12 @@
 # SOFTWARE.
 
 from __future__ import annotations
+
+import aiohttp
 from aiohttp.web_ws import WebSocketResponse
 
 import bpy
 import asyncio
-import aiohttp
 from aiohttp import web
 from time import time
 

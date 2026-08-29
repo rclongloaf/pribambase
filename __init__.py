@@ -23,19 +23,149 @@ import sys
 import os.path as path
 from glob import glob
 
+import sys
+import os
+import site
 
-import importlib
-import pip
+# 1. Добавляем ВСЕ возможные пути в САМОМ НАЧАЛЕ
+addon_dir = os.path.dirname(__file__)
 
+# Путь для vendor (если он есть и полный)
+vendor_path = os.path.join(addon_dir, "vendor")
+
+
+# Проверяем, есть ли ВСЕ зависимости в vendor
+def check_vendor_complete():
+    """Проверяет, что vendor содержит все необходимые пакеты"""
+    if not os.path.exists(vendor_path):
+        return False
+
+    required_packages = ["aiohttp", "multidict", "yarl", "attrs", "frozenlist", "async_timeout"]
+    for pkg in required_packages:
+        pkg_path = os.path.join(vendor_path, pkg)
+        if not os.path.exists(pkg_path):
+            print(f"В vendor отсутствует: {pkg}")
+            return False
+
+    return True
+
+
+# Только если vendor полный - добавляем его
+if check_vendor_complete():
+    sys.path.insert(0, vendor_path)
+    print(f"✓ Использую зависимости из vendor: {vendor_path}")
+else:
+    print(f"✗ Vendor неполный или отсутствует, проверяю пользовательские пути...")
+
+# 2. Добавляем путь к AppData (даже если он пустой сейчас)
 try:
-    importlib.import_module('aiohttp')
-except ImportError:
-    pip.main(['install', 'aiohttp', '--target', (sys.exec_prefix) + '\lib\site-packages'])
+    user_site = site.getusersitepackages()
+    if os.path.exists(user_site):
+        if user_site not in sys.path:
+            sys.path.append(user_site)
+        print(f"✓ Добавлен пользовательский путь: {user_site}")
+
+        # Проверяем, что там есть
+        import os
+
+        items = os.listdir(user_site) if os.path.exists(user_site) else []
+        print(f"  Содержимое: {items}")
+except Exception as e:
+    print(f"Не удалось получить user_site: {e}")
 
 
+# 3. Функция для установки зависимостей ДО импорта
+def install_dependencies():
+    """Устанавливает все необходимые зависимости"""
+    print("\n" + "=" * 60)
+    print("Pribambase: установка зависимостей...")
 
-thirdparty = path.join(path.dirname(__file__), "thirdparty", "*.whl")
-sys.path += glob(thirdparty)
+    try:
+        import subprocess
+        import sys
+
+        # Устанавливаем aiohttp со всеми зависимостями
+        result = subprocess.run([
+            sys.executable, "-m", "pip", "install",
+            "aiohttp>=3.8.0",
+            "--user",
+            "--quiet"
+        ], capture_output=True, text=True)
+
+        if result.returncode == 0:
+            print("✓ Зависимости успешно установлены!")
+
+            # Обновляем путь после установки
+            try:
+                user_site = site.getusersitepackages()
+                if user_site not in sys.path:
+                    sys.path.append(user_site)
+            except:
+                pass
+
+            return True
+        else:
+            print(f"✗ Ошибка установки: {result.stderr}")
+            return False
+
+    except Exception as e:
+        print(f"✗ Не удалось запустить pip: {e}")
+        return False
+
+
+# 4. Пытаемся импортировать aiohash СРАЗУ
+try:
+    import aiohttp
+
+    print(f"✓ aiohttp найден: {aiohttp.__file__}")
+    aiohttp_available = True
+except ImportError as e:
+    print(f"✗ aiohttp не найден: {e}")
+    aiohttp_available = False
+
+# 5. Если aiohttp не найден - пытаемся установить
+if not aiohttp_available:
+    if install_dependencies():
+        # Пробуем снова импортировать после установки
+        try:
+            import aiohttp
+
+            print(f"✓ aiohttp загружен после установки: {aiohttp.__file__}")
+            aiohttp_available = True
+        except ImportError:
+            aiohttp_available = False
+    else:
+        print("\n" + "=" * 60)
+        print("НЕ УДАЛОСЬ УСТАНОВИТЬ ЗАВИСИМОСТИ")
+        print("Установите вручную:")
+        print("1. Откройте командную строку (Win+R -> cmd)")
+        print("2. Выполните: python -m pip install aiohttp --user")
+        print("3. Перезапустите Blender")
+        print("=" * 60)
+
+# 6. Если aiohttp так и не доступен - не загружаем аддон
+if not aiohttp_available:
+    print("\nPribambase не будет загружен: отсутствует aiohttp")
+
+
+    def register():
+        print("Pribambase: зависимости не установлены")
+
+
+    def unregister():
+        pass
+
+
+    # Выходим, не выполняя остальной код
+    # Это предотвратит ошибку при импорте sync.py
+    import sys
+
+    sys.exit(0)  # Завершаем загрузку этого модуля
+
+# 7. Только если aiohttp доступен - продолжаем загрузку аддона
+print("=" * 60)
+print("Pribambase: все зависимости загружены")
+print("=" * 60)
 
 
 from bpy.app.handlers import persistent
