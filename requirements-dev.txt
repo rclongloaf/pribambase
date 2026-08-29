@@ -1,0 +1,8 @@
+-r requirements.txt
+
+# IDE completion for the Blender version used by this project.
+fake-bpy-module-5.2==20260730
+
+# Local quality tools. Unit tests use Python's standard unittest module.
+debugpy>=1.8,<2
+ruff>=0.12,<1

@@ -36,7 +36,12 @@ class Addon:
     @property
     def prefs(self) -> 'SB_Preferences':
         """Get typed addon settings"""
-        return bpy.context.preferences.addons[__package__].preferences
+        entry = bpy.context.preferences.addons.get(__package__)
+        if entry is None:
+            raise RuntimeError(
+                f"Pribambase preferences are unavailable for module {__package__!r}."
+            )
+        return entry.preferences
 
 
     @property

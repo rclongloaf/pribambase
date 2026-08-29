@@ -49,7 +49,11 @@ See [Reference](Reference) for all features.
 
 ## Source
 
-Source for [aseprite plugin](https://github.com/aseprite/api/blob/main/api/plugin.md) is the `client/` folder. The repo root is the [blender plugin](https://docs.blender.org/manual/en/latest/advanced/scripting/addon_tutorial.html#install-the-add-on). For using source, you'd probably want to symlink them to extension/addon locations.
+Source for the [Aseprite plugin](https://www.aseprite.org/api/plugin) is the `client/` folder. The
+repo root is the [Blender plugin](https://docs.blender.org/manual/en/latest/advanced/scripting/addon_tutorial.html#install-the-add-on).
+
+For the automated PyCharm workflow—including Aseprite packaging and launch, Blender source
+loading, API completion, and smoke tests—see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 Third party dependencies aren't stored in the repo. Download them from PyPI to `thirdparty` folder, or fetch with PIP:
 

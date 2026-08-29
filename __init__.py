@@ -23,7 +23,6 @@ import sys
 import os.path as path
 from glob import glob
 
-import sys
 import os
 import site
 
@@ -55,7 +54,7 @@ if check_vendor_complete():
     sys.path.insert(0, vendor_path)
     print(f"✓ Использую зависимости из vendor: {vendor_path}")
 else:
-    print(f"✗ Vendor неполный или отсутствует, проверяю пользовательские пути...")
+    print("✗ Vendor неполный или отсутствует, проверяю пользовательские пути...")
 
 # 2. Добавляем путь к AppData (даже если он пустой сейчас)
 try:
@@ -145,22 +144,9 @@ if not aiohttp_available:
 
 # 6. Если aiohttp так и не доступен - не загружаем аддон
 if not aiohttp_available:
-    print("\nPribambase не будет загружен: отсутствует aiohttp")
-
-
-    def register():
-        print("Pribambase: зависимости не установлены")
-
-
-    def unregister():
-        pass
-
-
-    # Выходим, не выполняя остальной код
-    # Это предотвратит ошибку при импорте sync.py
-    import sys
-
-    sys.exit(0)  # Завершаем загрузку этого модуля
+    raise ModuleNotFoundError(
+        "Pribambase cannot be loaded because the aiohttp dependency is unavailable."
+    )
 
 # 7. Только если aiohttp доступен - продолжаем загрузку аддона
 print("=" * 60)
@@ -271,6 +257,7 @@ def unregister():
     del bpy.types.Scene.sb_state
     del bpy.types.Image.sb_source
     del bpy.types.Image.sb_scale
+    del bpy.types.Image.sb_offset
 
     from bpy.utils import unregister_class
     for cls in reversed(classes):

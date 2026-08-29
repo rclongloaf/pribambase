@@ -1,0 +1,7 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Debug - Attach to Blender" type="PythonDapAttachConfiguration" factoryName="Attach to DAP">
+    <option name="remoteAddress" value="127.0.0.1:5678" />
+    <option name="justMyCode" value="true" />
+    <method v="2" />
+  </configuration>
+</component>
