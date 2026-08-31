@@ -24,13 +24,16 @@ if len(arguments) not in (2, 5):
     )
 
 PROJECT_ROOT = Path(arguments[0]).resolve()
+ADDON_ROOT = PROJECT_ROOT / "blender"
 DEPENDENCIES = str(Path(arguments[1]).resolve())
-MODULE_NAME = PROJECT_ROOT.name
-PROJECT_PARENT = str(PROJECT_ROOT.parent)
+MODULE_NAME = "pribambase"
 if DEPENDENCIES not in sys.path:
     sys.path.insert(0, DEPENDENCIES)
-if PROJECT_PARENT not in sys.path:
-    sys.path.insert(0, PROJECT_PARENT)
+TOOLS_ROOT = str(PROJECT_ROOT / "tools")
+if TOOLS_ROOT not in sys.path:
+    sys.path.insert(0, TOOLS_ROOT)
+
+from addon_loader import load_addon_module
 
 if len(arguments) == 5:
     if arguments[2] != "--debug":
@@ -90,10 +93,10 @@ def load_addon() -> None:
     global addon_module
     unload_addon()
     importlib.invalidate_caches()
-    addon_module = importlib.import_module(MODULE_NAME)
+    addon_module = load_addon_module(PROJECT_ROOT, MODULE_NAME)
     addon_module.register()
     ensure_addon_preferences()
-    print(f"Pribambase dev: loaded from {PROJECT_ROOT}")
+    print(f"Pribambase dev: loaded from {ADDON_ROOT}")
 
 
 class PRIBAMBASE_OT_reload_dev(bpy.types.Operator):

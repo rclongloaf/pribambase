@@ -1,7 +1,7 @@
 # Pribambase development
 
 This repository includes repeatable Blender 5.2, Aseprite, and PyCharm workflows. The Blender
-add-on is loaded directly from the working tree, while the Aseprite client is packaged and
+add-on is loaded directly from `blender/`, while the Aseprite extension from `aseprite/` is packaged and
 installed automatically before launch.
 
 ## First-time setup on Windows
@@ -19,7 +19,7 @@ installed automatically before launch.
 
 4. In **Settings | Python | Interpreter**, select `.venv\Scripts\python.exe` if PyCharm did not
    detect it automatically.
-5. Install Aseprite, then run `.\client.ps1 info` to verify its executable and profile paths.
+5. Install Aseprite, then run `.\aseprite.ps1 info` to verify its executable and profile paths.
 6. Run the shared **Quality - All** configuration once.
 
 Blender is auto-detected in common install locations. For a portable/custom installation, copy
@@ -36,13 +36,17 @@ Blender is auto-detected in common install locations. For a portable/custom inst
 - **Tests - Unit** runs fast tests without Blender.
 - **Blender - Smoke test** starts Blender in background mode, then verifies import, registration,
   and complete unregistration.
-- **Aseprite - Build client** creates `dist/pribambase.aseprite-extension`.
-- **Aseprite - Test client** builds the client and asks Aseprite to compile and smoke-test its Lua
+- **Aseprite - Build extension** creates `dist/pribambase.aseprite-extension`.
+- **Aseprite - Test extension** builds the extension and asks Aseprite to compile and smoke-test its Lua
   files in background mode.
-- **Aseprite - Run client** builds the package, installs a managed development copy, and starts
+- **Aseprite - Run extension** builds the package, installs a managed development copy, and starts
   a new Aseprite instance so the updated extension is loaded. Close older instances if their
-  menus make it unclear which client build is active.
-- **Quality - All** runs Ruff, unit tests, the Blender smoke test, and the Aseprite client test in
+  menus make it unclear which extension build is active.
+- **Sample - Run roundtrip** opens a ready Aseprite texture and Blender scene demonstrating live
+  texture updates and sending the rendered projection back to Aseprite.
+- **Sample - Build roundtrip** regenerates the sample assets; **Sample - Test roundtrip** validates
+  the source link, material, and a real 64×64 Blender render.
+- **Quality - All** runs Ruff, unit tests, the Blender smoke test, and the Aseprite extension test in
   that order.
 
 The same actions are available in the terminal:
@@ -57,17 +61,28 @@ The same actions are available in the terminal:
 .\dev.ps1 all
 ```
 
-The Aseprite client commands are:
+The Aseprite extension commands are:
 
 ```powershell
-.\client.ps1 info
-.\client.ps1 build
-.\client.ps1 test
-.\client.ps1 install
-.\client.ps1 run
+.\aseprite.ps1 info
+.\aseprite.ps1 build
+.\aseprite.ps1 test
+.\aseprite.ps1 install
+.\aseprite.ps1 run
 ```
 
-`build` produces both an unpacked client under `build/aseprite/pribambase` and the distributable
+The round-trip sample commands are:
+
+```powershell
+.\sample.ps1 info
+.\sample.ps1 build
+.\sample.ps1 test
+.\sample.ps1 run
+```
+
+See [`examples/roundtrip/README.md`](examples/roundtrip/README.md) for the step-by-step workflow.
+
+`build` produces both an unpacked extension under `build/aseprite/pribambase` and the distributable
 `dist/pribambase.aseprite-extension`. `install` deploys it to the current Aseprite profile under
 `extensions/pribambase`. The runner only replaces copies marked as development installs. If a
 regular installation already exists, remove it through Aseprite or use `install --force`; the
@@ -88,3 +103,18 @@ network as a side effect of importing the add-on.
 The debug listener binds to loopback only. To use another local port, set `BLENDER_DEBUG_PORT` in
 `.env` and update the DAP configuration to match. Pausing the main thread at a breakpoint also
 pauses Blender's UI until execution resumes.
+
+## Source-pair workflow
+
+The round-trip sample stores the editable sources as a pair:
+
+- `pribambase_roundtrip.blend` owns geometry, animation, light, and global projection settings;
+- `roundtrip_texture.aseprite` owns painted pixels;
+- `pribambase_roundtrip.pribambase.json` stores portable pair and animation settings;
+- generated PNGs and Blender projections are replaceable outputs.
+
+Run **Sample - Run roundtrip**, then press **Start Sync** in Blender and choose
+**File > Pribambase: Start Sync** in Aseprite. Texture edits travel to Blender immediately.
+Relevant Blender dependency-graph changes mark the current frame dirty and, when enabled, render
+the guide after the configured idle delay. Incoming image updates are excluded from that detector
+to prevent feedback loops.

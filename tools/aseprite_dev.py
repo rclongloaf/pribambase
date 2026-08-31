@@ -1,4 +1,4 @@
-"""Build, test, install, and run the Pribambase Aseprite client."""
+"""Build, test, install, and run the Pribambase Aseprite extension."""
 
 from __future__ import annotations
 
@@ -16,10 +16,11 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CLIENT_ROOT = PROJECT_ROOT / "client"
+EXTENSION_ROOT = PROJECT_ROOT / "aseprite"
 BUILD_ROOT = PROJECT_ROOT / "build" / "aseprite"
 DIST_ROOT = PROJECT_ROOT / "dist"
 SMOKE_TEST = PROJECT_ROOT / "tests" / "aseprite" / "smoke_test.lua"
+TEST_RUNNER = PROJECT_ROOT / "tests" / "aseprite" / "test_runner.lua"
 DEV_MARKER = ".pribambase-dev"
 
 
@@ -110,7 +111,7 @@ def user_config_path() -> Path:
 
 
 def read_manifest() -> dict[str, object]:
-    path = CLIENT_ROOT / "package.json"
+    path = EXTENSION_ROOT / "package.json"
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
@@ -121,22 +122,22 @@ def read_manifest() -> dict[str, object]:
     name = manifest.get("name")
     version = manifest.get("version")
     if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", name):
-        raise DevError("client/package.json must contain a safe lowercase package name.")
+        raise DevError("aseprite/package.json must contain a safe lowercase package name.")
     if not isinstance(version, str) or not version:
-        raise DevError("client/package.json must contain a non-empty version.")
+        raise DevError("aseprite/package.json must contain a non-empty version.")
 
     contributes = manifest.get("contributes")
     scripts = contributes.get("scripts") if isinstance(contributes, dict) else None
     if not isinstance(scripts, list) or not scripts:
-        raise DevError("client/package.json must contribute at least one script.")
+        raise DevError("aseprite/package.json must contribute at least one script.")
 
     for script in scripts:
         relative = script.get("path") if isinstance(script, dict) else None
         if not isinstance(relative, str):
             raise DevError("Every contributed script must have a path.")
-        source = (CLIENT_ROOT / relative).resolve()
-        if CLIENT_ROOT.resolve() not in source.parents or not source.is_file():
-            raise DevError(f"Contributed script is missing or outside /client: {relative}")
+        source = (EXTENSION_ROOT / relative).resolve()
+        if EXTENSION_ROOT.resolve() not in source.parents or not source.is_file():
+            raise DevError(f"Contributed script is missing or outside /aseprite: {relative}")
 
     return manifest
 
@@ -150,15 +151,16 @@ def clear_generated_directory(path: Path) -> None:
         shutil.rmtree(resolved)
 
 
-def client_files() -> list[Path]:
+def extension_files() -> list[Path]:
     return sorted(
         path
-        for path in CLIENT_ROOT.rglob("*")
-        if path.is_file() and not any(part.startswith(".") for part in path.relative_to(CLIENT_ROOT).parts)
+        for path in EXTENSION_ROOT.rglob("*")
+        if path.is_file()
+        and not any(part.startswith(".") for part in path.relative_to(EXTENSION_ROOT).parts)
     )
 
 
-def build_client() -> BuildResult:
+def build_extension() -> BuildResult:
     manifest = read_manifest()
     name = str(manifest["name"])
     version = str(manifest["version"])
@@ -166,8 +168,8 @@ def build_client() -> BuildResult:
 
     clear_generated_directory(BUILD_ROOT)
     destination.mkdir(parents=True)
-    for source in client_files():
-        relative = source.relative_to(CLIENT_ROOT)
+    for source in extension_files():
+        relative = source.relative_to(EXTENSION_ROOT)
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
@@ -180,13 +182,13 @@ def build_client() -> BuildResult:
         for source in sorted(path for path in destination.rglob("*") if path.is_file()):
             package.write(source, source.relative_to(destination).as_posix())
 
-    print(f"Built Aseprite client {name} {version}")
+    print(f"Built Aseprite extension {name} {version}")
     print(f"Directory: {destination}")
     print(f"Package: {archive}")
     return BuildResult(name, version, destination, archive)
 
 
-def install_client(build: BuildResult, *, force: bool = False) -> Path:
+def install_extension(build: BuildResult, *, force: bool = False) -> Path:
     extensions = user_config_path() / "extensions"
     extensions.mkdir(parents=True, exist_ok=True)
     target = extensions / build.name
@@ -214,7 +216,7 @@ def install_client(build: BuildResult, *, force: bool = False) -> Path:
     if target.exists():
         shutil.rmtree(target)
     stage.rename(target)
-    print(f"Installed development client: {target}")
+    print(f"Installed development extension: {target}")
     return target
 
 
@@ -223,36 +225,41 @@ def run_command(command: list[str]) -> int:
     return subprocess.run(command, cwd=PROJECT_ROOT, check=False).returncode
 
 
-def launch_aseprite(executable: Path) -> int:
-    command = [str(executable)]
+def launch_aseprite(executable: Path, files: list[Path] | None = None) -> int:
+    command = [str(executable), *(str(path) for path in files or [])]
     print(f"> {subprocess.list2cmdline(command)}", flush=True)
     process = subprocess.Popen(command, cwd=PROJECT_ROOT)
     print(f"Aseprite started (PID {process.pid}).")
     return 0
 
 
-def test_client(aseprite: Path) -> int:
-    build = build_client()
+def test_extension(aseprite: Path) -> int:
+    build = build_extension()
     result_marker = BUILD_ROOT / ".smoke-test-ok"
     if result_marker.exists():
         result_marker.unlink()
+    error_marker = BUILD_ROOT / ".smoke-test-ok.error"
+    if error_marker.exists():
+        error_marker.unlink()
     code = run_command(
         [
             str(aseprite),
             "--batch",
             "--script-param",
-            f"client={build.directory}",
+            f"extension={build.directory}",
             "--script-param",
             f"result={result_marker}",
+            "--script-param",
+            f"test={SMOKE_TEST}",
             "--script",
-            str(SMOKE_TEST),
+            str(TEST_RUNNER),
         ]
     )
     if code:
         return code
     if not result_marker.is_file() or result_marker.read_text(encoding="utf-8") != "ok\n":
-        raise DevError("Aseprite did not complete the client smoke test.")
-    print("Pribambase Aseprite client smoke test passed")
+        raise DevError("Aseprite did not complete the extension smoke test.")
+    print("Pribambase Aseprite extension smoke test passed")
     return 0
 
 
@@ -276,8 +283,8 @@ def show_info(aseprite: Path) -> int:
     print(f"Project: {PROJECT_ROOT}")
     print(f"Aseprite: {aseprite}")
     print(f"Aseprite user config: {user_config_path()}")
-    print(f"Client: {manifest['name']} {manifest['version']}")
-    print(f"Development client installed: {'yes' if (target / DEV_MARKER).is_file() else 'no'}")
+    print(f"Extension: {manifest['name']} {manifest['version']}")
+    print(f"Development extension installed: {'yes' if (target / DEV_MARKER).is_file() else 'no'}")
     print(f"Aseprite running: {'yes' if aseprite_is_running(aseprite) else 'no'}")
     return 0
 
@@ -300,25 +307,25 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.command == "build":
-        build_client()
+        build_extension()
         return 0
 
     aseprite = find_aseprite(args.aseprite)
     if args.command == "info":
         return show_info(aseprite)
     if args.command == "install":
-        install_client(build_client(), force=args.force)
+        install_extension(build_extension(), force=args.force)
         return 0
     if args.command == "test":
-        return test_client(aseprite)
+        return test_extension(aseprite)
     if args.command == "all":
-        return test_client(aseprite)
+        return test_extension(aseprite)
     if args.command == "run":
-        install_client(build_client(), force=args.force)
+        install_extension(build_extension(), force=args.force)
         if aseprite_is_running(aseprite):
             print(
                 "Warning: Aseprite is already running; starting a separate development instance "
-                "so the updated client is loaded."
+                "so the updated extension is loaded."
             )
         return launch_aseprite(aseprite)
     raise AssertionError(f"Unhandled command: {args.command}")

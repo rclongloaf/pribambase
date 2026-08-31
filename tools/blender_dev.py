@@ -210,7 +210,7 @@ def site_packages(python: Path) -> Path:
 
 def blender_environment(python: Path) -> dict[str, str]:
     env = os.environ.copy()
-    paths = [str(PROJECT_ROOT.parent), str(site_packages(python))]
+    paths = [str(PROJECT_ROOT), str(site_packages(python))]
     if env.get("PYTHONPATH"):
         paths.append(env["PYTHONPATH"])
     env["PYTHONPATH"] = os.pathsep.join(paths)
@@ -224,6 +224,7 @@ def run_blender(
     *,
     background: bool,
     script_arguments: list[str] | None = None,
+    project_file: Path | None = None,
 ) -> int:
     python = require_venv()
     dependencies = site_packages(python)
@@ -237,6 +238,7 @@ def run_blender(
             "--python-use-system-env",
             "--python-exit-code",
             "1",
+            *([str(project_file)] if project_file is not None else []),
             "--python",
             str(script),
             "--",
@@ -250,6 +252,7 @@ def run_blender(
 
 def show_info(blender: Path) -> int:
     print(f"Project: {PROJECT_ROOT}")
+    print(f"Blender add-on source: {PROJECT_ROOT / 'blender'}")
     print(f"Blender: {blender}")
     version = capture([str(blender), "--version"]).splitlines()[0]
     print(f"Version: {version}")

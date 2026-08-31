@@ -1,76 +1,55 @@
 # Pribambase
 
-Pribambase is a small tool that connects Aseprite and Blender, to allow painting with instant viewport feedback and all functionality of external editor at the same time. It also adds a few shortcuts like displaying the UV map in Aseprite or setting up a grid-scaled pixelart reference in the viewport.
+Pribambase 2.3 связывает исходную пиксельную текстуру Aseprite с моделью Blender:
 
-Currently, the addon has mostly one-way workflow where you paint in Ase and not much in Blender. Better bidirectional workflow ~~is quite a task tell ya what~~ is planned in future versions.
+- изменения paint-слоёв Aseprite сразу видны на модели;
+- AO, Roughness, Metallic и Emission рисуются как понятные grayscale-слои и автоматически собираются в ORME;
+- изменения модели и света возвращаются как pixel-perfect reference-guides без сглаживания;
+- материал использует фиксированную world-space проекцию без покадровых UV;
+- один canvas рассчитывается по максимальным bounds всей анимации и безопасно растёт в Aseprite;
+- кадры Blender и Aseprite могут переключаться синхронно;
+- `.blend` и `.aseprite` объединяются переносимым `*.pribambase.json` манифестом.
 
-* [Download](https://lampysprites.itch.io/pribambase) packaged version for your platform
-* [Geeting Started](https://github.com/lampysprites/pribambase/wiki/Getting-Started) after installing, look there
-* [Reference](https://github.com/lampysprites/pribambase/wiki/Reference) explains each button and setting
-* [Itchio forum](https://lampysprites.itch.io/pribambase/community) to show off your work or ask for help
-* [Issue tracker](https://github.com/lampysprites/pribambase/issues) for bug reports and feature requests. Kindly don't submit non-technical help requests.
+![Aseprite texture](examples/roundtrip/roundtrip_texture.png)
+![Blender projection](examples/roundtrip/roundtrip_projection.png)
 
-​Although the entire project is distributed free of charge, I highly encourage you to support it financially sooner or later, as if it was on blen\*\*\*arket or flip\*\*\*rmals. There's still work left to do, and it'd be pretty great to be able to do it sooner.
+## Документация
 
-## Setup
+- [Полное руководство пользователя на русском](docs/USER_GUIDE_RU.md)
+- [Готовый round-trip sample](examples/roundtrip/README.md)
+- [Настройка разработки и PyCharm](DEVELOPMENT.md)
 
-_[Video version](https://youtu.be/70wyQhKyxFw) - all thanks to [frozenMeatpopsicle](https://twitter.com/fznmeatpopsicle)_
+## Быстрый старт для разработчика
 
-This plugin consists of **two** parts: for Aseprite and for Blender. Get pre-packaged version for your OS [on Itchio](https://lampysprites.itch.io/pribambase). **Do not** download repo ZIP, it won't just work without extra steps.
-
-### Prerequisites
-
-* [Blender](https://Blender.org) recommended version 2.83 or later, preferrably latest. Minimum version is 2.80, but performance and stability are significantly worse
-* [Aseprite](https://Aseprite.org) minimum version 1.2.30 or 1.3-beta7. Trial version won't work
-
-### Installing Aseprite plugin
-1. Launch Aseprite and drag the file called __pribambase-aseprite__ into the window
-1. Press Install
-1. Restart Aseprite
-
-After that, a new menu option called **Sync** should appear in the **File** menu
-
-### Installing Blender plugin
-1. In __Edit > Preferences > Addons__ click __Install__ and chose the file called __pribambase-blender-\[YOUR OS\]__
-1. After the addon appears in the list, check the box next to its name to activate it. The app might freeze for several seconds
-1. Save preferences from the "burger" menu
-
-After that, a new section called **Sync** will appear in **N > Tools** tab in viewport, and a new menu called **Sprite** will appear in the Image/uv editor.
-
-## Usage
-
-After the plugins are installed, turn each of them on before drawing: nn blender press __Connect__ on top of the plugin's panel in the viewport, in Aseprite press __File > Sync__ . After that you can:
-
-* Open any texture used in blendfile normally in Aseprite, and it will be updated in Blender as you paint. This applies to both textures created normally with blender, and textures set up by the plugin
-* Use **Image Editor > Sprite** menu to load aseprite files as textures, or create new ones
-* Use **Sprite > Send UV** to show the UV Map in aseprite
-
-See [Reference](Reference) for all features.
-
-## Source
-
-Source for the [Aseprite plugin](https://www.aseprite.org/api/plugin) is the `client/` folder. The
-repo root is the [Blender plugin](https://docs.blender.org/manual/en/latest/advanced/scripting/addon_tutorial.html#install-the-add-on).
-
-For the automated PyCharm workflow—including Aseprite packaging and launch, Blender source
-loading, API completion, and smoke tests—see [DEVELOPMENT.md](DEVELOPMENT.md).
-
-Third party dependencies aren't stored in the repo. Download them from PyPI to `thirdparty` folder, or fetch with PIP:
-
-```shell
-cd to/project/root
-
-## for your platform
-pip download -d thirdparty -r requirements.txt
-
-## for different platforms; the platform tags tags go look up on PyPI
-pip download -d thirdparty --platform win32 --only-binary=:all: -r requirements.txt
+```powershell
+.\dev.ps1 setup
+.\dev.ps1 all
+.\sample.ps1 run
 ```
 
-## License
-In accordance with Blender developers' [wishes](https://www.blender.org/about/license/), the addon is distributed under GPL-3.0 license.
-See COPYING for full license text.
-Specific files or libraries might be also available under different terms, see included comment or package licenses.
+После открытия sample:
 
-## Acknowledgements
-Async loop handling is based on [Blender Cloud Addon](https://cloud.blender.org/services)
+1. Blender: `N → Tool → Pribambase → Start Sync`.
+2. Aseprite: `File → Pribambase: Start Sync`.
+3. Измените текстуру или модель и проверьте обмен в обе стороны.
+
+## Структура проекта
+
+- `blender/` — Blender add-on;
+- `aseprite/` — Aseprite extension;
+- `blender/workspace.py` — source pair и автоматические проекции;
+- `blender/projection.py` — глобальная проекция, общий canvas, камера и материал;
+- `examples/roundtrip/` — готовая пара исходников;
+- `tests/` — unit, Blender и Aseprite smoke tests.
+
+## Сборка Aseprite extension
+
+```powershell
+.\aseprite.ps1 build
+```
+
+Результат: `dist/pribambase.aseprite-extension`.
+
+## Лицензия
+
+Проект распространяется по GPL-3.0. Полный текст находится в [COPYING](COPYING).

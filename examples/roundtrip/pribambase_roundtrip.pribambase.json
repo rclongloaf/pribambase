@@ -1,0 +1,40 @@
+{
+  "schema_version": 2,
+  "asset": "Roundtrip Cube",
+  "sources": {
+    "blender": "pribambase_roundtrip.blend",
+    "aseprite": "roundtrip_texture.aseprite"
+  },
+  "animation": {
+    "fps": 12.0,
+    "frame_start": 1,
+    "frame_end": 12
+  },
+  "sync": {
+    "guide_layer": "Pribambase Render",
+    "auto_render_current": true,
+    "auto_render_on_save": false,
+    "follow_frame": true
+  },
+  "projection": {
+    "profile": "global_iso_v1",
+    "pixels_per_unit": 20.0,
+    "collection": "PB_Projected",
+    "material": "PB_Roundtrip_Cube_Projected",
+    "image": "RoundtripTexture",
+    "material_image": "PB_Roundtrip_Cube_ORME",
+    "emission_strength": 2.0,
+    "padding": 2,
+    "auto_grow": true,
+    "canvas": {
+      "min_x": -32,
+      "min_y": -32,
+      "max_x": 32,
+      "max_y": 32,
+      "width": 64,
+      "height": 64,
+      "origin_x": 32,
+      "origin_y": 32
+    }
+  }
+}
