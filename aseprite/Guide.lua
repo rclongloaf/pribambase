@@ -3,13 +3,23 @@ local Guide = {}
 local pluginKey = "lampysprites/pribambase"
 
 
-function Guide.markRenderLayer(layer)
+local function mark(layer, role)
     if layer == nil or not layer.isReference then return false end
     local values = layer.properties(pluginKey)
-    if values.role == "render-guide" and values.schema == 1 then return false end
-    values.role = "render-guide"
+    if values.role == role and values.schema == 1 then return false end
+    values.role = role
     values.schema = 1
     return true
+end
+
+
+function Guide.markRenderLayer(layer)
+    return mark(layer, "render-guide")
+end
+
+
+function Guide.markWorldNormalLayer(layer)
+    return mark(layer, "world-normal-generated")
 end
 
 
@@ -26,6 +36,41 @@ function Guide.isRenderLayer(layer)
     return layer ~= nil
         and layer.isReference
         and layer.properties(pluginKey).role == "render-guide"
+end
+
+
+function Guide.isWorldNormalLayer(layer)
+    return layer ~= nil
+        and layer.isReference
+        and layer.properties(pluginKey).role == "world-normal-generated"
+end
+
+
+local function findTypedLayer(sprite, role)
+    if sprite == nil then return nil end
+    for _,layer in ipairs(sprite.layers) do
+        if layer.isReference and layer.properties(pluginKey).role == role then
+            return layer
+        end
+    end
+    return nil
+end
+
+
+function Guide.findWorldNormalLayer(sprite)
+    local typed = findTypedLayer(sprite, "world-normal-generated")
+    if typed ~= nil then return typed end
+    if sprite == nil then return nil end
+    for _,layer in ipairs(sprite.layers) do
+        if layer.isReference and (
+            layer.name == "Pribambase World Normal"
+            or string.match(layer.name, "^Pribambase World Normal %(Generated%)") ~= nil
+        ) then
+            Guide.markWorldNormalLayer(layer)
+            return layer
+        end
+    end
+    return nil
 end
 
 

@@ -102,3 +102,22 @@ def canvas(size:Tuple[int, int], origin:Tuple[int, int], sprite:str) -> bytearra
     add_sint(data, origin[1], 4)
     add_string(data, sprite)
     return data
+
+
+def generated_image(
+    size: Tuple[int, int],
+    frame: int,
+    kind: str,
+    sprite: str,
+    pixels: bytes,
+) -> bytearray:
+    """Send one Blender-owned generated texture to a read-only Aseprite layer."""
+    data = bytearray()
+    add_id(data, 'D')
+    add_uint(data, size[0], 2)
+    add_uint(data, size[1], 2)
+    add_uint(data, frame, 4)
+    add_string(data, kind)
+    add_string(data, sprite)
+    add_data(data, pixels)
+    return data

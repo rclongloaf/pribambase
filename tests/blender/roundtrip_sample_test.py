@@ -64,10 +64,16 @@ def main() -> None:
 
         manifest_path = sample_root / "pribambase_roundtrip.pribambase.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        assert manifest["schema_version"] == 2
+        assert manifest["schema_version"] == 4
         assert manifest["asset"] == "Roundtrip Cube"
         assert manifest["sources"]["aseprite"] == "roundtrip_texture.aseprite"
         assert manifest["animation"]["fps"] == 12.0
+        detail_manifest = manifest["surface_detail"]
+        assert detail_manifest["source"] == "world_normal"
+        assert detail_manifest["edit_scale"] == 2
+        assert detail_manifest["apply_generated_normal"] is True
+        assert detail_manifest["auto_rebuild"] is True
+        assert detail_manifest["auto_send"] is True
         projection_manifest = manifest["projection"]
         assert projection_manifest["profile"] == "global_iso_v1"
         assert projection_manifest["pixels_per_unit"] == 20.0
@@ -96,7 +102,7 @@ def main() -> None:
         assert (canvas.origin_x, canvas.origin_y) == (32, 32)
         material = state.projection_material
         assert material is not None and material.get("pribambase_project_material")
-        assert material.get("pribambase_material_schema") == 3
+        assert material.get("pribambase_material_schema") == 8
         projection_nodes = [
             node
             for node in material.node_tree.nodes

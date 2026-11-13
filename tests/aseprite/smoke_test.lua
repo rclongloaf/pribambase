@@ -84,6 +84,29 @@ assert(
     app.pixelColor.rgbaR(referenceLayer:cel(1).image:getPixel(0, 0)) == 12,
     "Undo unexpectedly reverted non-undoable external render-guide pixels"
 )
+app.command.NewLayer{reference=true}
+local normalLayer = app.activeLayer
+normalLayer.name = "Pribambase World Normal"
+normalLayer.isEditable = false
+normalLayer.isVisible = false
+Guide.markWorldNormalLayer(normalLayer)
+assert(Guide.isWorldNormalLayer(normalLayer), "World Normal generated role was not stored")
+assert(
+    Guide.findWorldNormalLayer(apiSprite) == normalLayer,
+    "World Normal generated layer metadata cannot be resolved"
+)
+assert(
+    Guide.findRenderLayer(apiSprite) == referenceLayer,
+    "Adding World Normal confused render-guide layer discovery"
+)
+local normalPixels = Image(2, 2, ColorMode.RGB)
+normalPixels:clear(app.pixelColor.rgba(128, 64, 255, 255))
+local normalCel = Guide.ensureCel(apiSprite, normalLayer, 1, normalPixels)
+Guide.updateCelPixels(normalCel, normalPixels)
+assert(
+    app.pixelColor.rgbaB(normalCel.image:getPixel(0, 0)) == 255,
+    "World Normal generated pixels were not refreshed"
+)
 
 local canvasSprite = Sprite(2, 2, ColorMode.RGB)
 app.activeSprite = canvasSprite
@@ -123,6 +146,8 @@ assert(
 
 local Channels = dofile(app.fs.joinPath(extension, "Channels.lua"))
 local PayloadCache = dofile(app.fs.joinPath(extension, "PayloadCache.lua"))
+local syncChunk, syncSyntaxError = loadfile(app.fs.joinPath(extension, "Sync.lua"))
+assert(syncChunk ~= nil, "Sync.lua syntax error: " .. tostring(syncSyntaxError))
 local payloadCache = PayloadCache.new()
 local payloadSpriteId = 1
 local payloadImage = Image(2, 1, ColorMode.RGB)
@@ -157,6 +182,7 @@ channelSprite.cels[1].image:drawPixel(1, 0, app.pixelColor.rgba(230, 20, 10, 255
 local _root, created = Channels.initialize(channelSprite)
 assert(created, "Material channel structure was not created")
 assert(Channels.hasStructure(channelSprite), "Material channel metadata is missing")
+assert(Channels.group(channelSprite, "normal") == nil, "World Normal must not be an editable channel")
 for _,channel in ipairs({"ao", "roughness", "metallic", "emission"}) do
     assert(
         Channels.previewOpacity(channelSprite, channel) == 96,

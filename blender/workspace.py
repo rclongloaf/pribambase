@@ -68,7 +68,7 @@ def workspace_manifest(scene: bpy.types.Scene, manifest_path: Path) -> dict[str,
     blend = Path(bpy.data.filepath)
     state = scene.sb_state
     manifest = {
-        "schema_version": 2,
+        "schema_version": 4,
         "asset": asset_name(scene),
         "sources": {
             "blender": _relative_or_absolute(blend, manifest_path.parent),
@@ -111,6 +111,13 @@ def workspace_manifest(scene: bpy.types.Scene, manifest_path: Path) -> dict[str,
                 "origin_y": layout.origin_y,
             },
         }
+        manifest["surface_detail"] = {
+            "source": "world_normal",
+            "edit_scale": 2,
+            "apply_generated_normal": state.apply_generated_normal,
+            "auto_rebuild": state.detail_auto_rebuild,
+            "auto_send": state.detail_auto_send,
+        }
     return manifest
 
 
@@ -133,13 +140,14 @@ def write_manifest(scene: bpy.types.Scene) -> Path:
 
 def load_manifest(scene: bpy.types.Scene, manifest_path: Path) -> None:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("schema_version") not in {1, 2}:
+    if manifest.get("schema_version") not in {1, 2, 3, 4}:
         raise RuntimeError("Unsupported Pribambase pair manifest version")
 
     sources = manifest.get("sources", {})
     animation = manifest.get("animation", {})
     sync = manifest.get("sync", {})
     projection_data = manifest.get("projection", {})
+    detail_data = manifest.get("surface_detail", {})
     sprite_value = str(sources.get("aseprite", ""))
     sprite_path = Path(sprite_value)
     if not sprite_path.is_absolute():
@@ -153,6 +161,14 @@ def load_manifest(scene: bpy.types.Scene, manifest_path: Path) -> None:
     state.auto_render_current = bool(sync.get("auto_render_current", True))
     state.auto_render_on_save = bool(sync.get("auto_render_on_save", False))
     state.follow_frame = bool(sync.get("follow_frame", True))
+    if isinstance(detail_data, dict):
+        state.apply_generated_normal = bool(
+            detail_data.get("apply_generated_normal", state.apply_generated_normal)
+        )
+        state.detail_auto_rebuild = bool(
+            detail_data.get("auto_rebuild", state.detail_auto_rebuild)
+        )
+        state.detail_auto_send = bool(detail_data.get("auto_send", state.detail_auto_send))
 
     if isinstance(projection_data, dict) and projection_data:
         profile = str(projection_data.get("profile", ""))
@@ -277,6 +293,9 @@ def recalculate_projection_layout(scene: bpy.types.Scene) -> tuple[projection.La
                 new_layout,
                 fill_color=(1.0, 128.0 / 255.0, 0.0, 0.0),
             )
+        from . import detail
+
+        detail.resize_detail_images(scene, old_layout, new_layout)
     projection.set_state_layout(scene, new_layout)
     projection.update_project_material(scene)
 
@@ -310,6 +329,19 @@ def connection_messages(scene: bpy.types.Scene) -> list[bytearray]:
             messages.append(canvas)
     if scene.sb_state.follow_frame:
         messages.append(encode.frame(scene.frame_current))
+    from . import detail
+
+    generated = detail.normal_image(scene)
+    if generated is not None and source:
+        messages.append(
+            encode.generated_image(
+                size=(generated.size[0], generated.size[1]),
+                frame=scene.frame_current,
+                kind="world-normal",
+                sprite=source,
+                pixels=util.get_mirrored_pixels(generated),
+            )
+        )
     return messages
 
 
@@ -342,8 +374,9 @@ def send_projection(scene: bpy.types.Scene, frame: int | None = None) -> None:
     image = None
     try:
         ensure_projection_layout(scene)
-        with projection.projection_render_context(scene):
-            image = get_render_image()
+        with projection.guide_material_context(scene):
+            with projection.projection_render_context(scene):
+                image = get_render_image()
         addon.server.send(_projection_message(scene, image, target_frame))
         _dirty_frames.discard(target_frame)
         _last_projection_frame = target_frame
@@ -371,7 +404,14 @@ def last_error() -> str:
 
 
 def is_rendering() -> bool:
-    return _rendering or _batch_restore_frame is not None or projection.is_scanning()
+    from . import detail
+
+    return (
+        _rendering
+        or _batch_restore_frame is not None
+        or projection.is_scanning()
+        or detail.is_generating()
+    )
 
 
 def _auto_render_timer():
@@ -386,6 +426,13 @@ def _auto_render_timer():
     ):
         return None
     try:
+        from . import detail
+
+        if (
+            scene.sb_state.detail_auto_rebuild
+            and scene.frame_current in detail.dirty_frames()
+        ):
+            detail.generate_normal(scene)
         send_projection(scene)
     except Exception as error:
         bpy.ops.pribambase.report(message_type='ERROR', message=f"Auto projection failed: {error}")
@@ -434,7 +481,7 @@ def _projection_bounds_changed(scene: bpy.types.Scene, updates) -> bool:
 
 
 def on_depsgraph_update(scene: bpy.types.Scene, depsgraph) -> None:
-    if is_rendering() or not addon.server_up:
+    if is_rendering():
         return
     updates = tuple(depsgraph.updates)
     updated = tuple(update.id.original for update in updates)
@@ -446,15 +493,20 @@ def on_depsgraph_update(scene: bpy.types.Scene, depsgraph) -> None:
         )
         for item in updated
     )
-    if _projection_bounds_changed(scene, updates):
+    bounds_changed = _projection_bounds_changed(scene, updates)
+    if bounds_changed:
         scene.sb_state.projection_bounds_dirty = True
+        from . import detail
+
+        detail.mark_geometry_dirty(scene)
     # The scene camera is only a viewing aid. Guides always use the canonical
     # global projection camera, so moving the user's camera is intentionally ignored.
-    if render_changed:
+    if render_changed and addon.server_up:
         mark_current_frame_dirty(scene)
 
 
 def on_frame_change(scene: bpy.types.Scene) -> None:
+    projection.update_project_material(scene)
     if is_rendering() or _applying_remote_frame or not addon.connected:
         return
     if scene.sb_state.follow_frame:
@@ -544,6 +596,9 @@ def reset_runtime() -> None:
     _batch_restore_frame = None
     _last_projection_frame = None
     _last_error = ""
+    from . import detail
+
+    detail.reset_runtime()
 
 
 class SB_OT_sync_start(bpy.types.Operator):
@@ -714,6 +769,48 @@ class SB_OT_projection_restore_camera(bpy.types.Operator):
             self.report({'ERROR'}, str(error))
             return {'CANCELLED'}
         self.report({'INFO'}, f"Restored projection view on {camera.name}")
+        return {'FINISHED'}
+
+
+class SB_OT_projection_view_camera(bpy.types.Operator):
+    bl_idname = "pribambase.projection_view_camera"
+    bl_label = "View Render Camera"
+    bl_description = "Switch this 3D Viewport to the active scene render camera without moving it"
+
+    @classmethod
+    def poll(cls, context):
+        return (
+            context.area is not None
+            and context.area.type == 'VIEW_3D'
+            and context.scene.camera is not None
+        )
+
+    def execute(self, context):
+        region_3d = getattr(context.space_data, "region_3d", None)
+        window_region = next(
+            (region for region in context.area.regions if region.type == 'WINDOW'),
+            None,
+        )
+        if region_3d is None or window_region is None:
+            self.report({'ERROR'}, "Open Pribambase in a 3D Viewport")
+            return {'CANCELLED'}
+        # Going through Blender's own operator updates the camera border and
+        # view matrices used by view3d_utils. Assigning view_perspective alone
+        # can look correct while leaving stale matrices, breaking paint raycasts.
+        if region_3d.view_perspective == 'CAMERA':
+            region_3d.view_perspective = 'PERSP'
+        with context.temp_override(
+            window=context.window,
+            area=context.area,
+            region=window_region,
+            space_data=context.space_data,
+        ):
+            result = bpy.ops.view3d.view_camera()
+        if result != {'FINISHED'}:
+            self.report({'ERROR'}, "Blender could not enter the active camera view")
+            return {'CANCELLED'}
+        context.area.tag_redraw()
+        self.report({'INFO'}, f"Viewing through {context.scene.camera.name}")
         return {'FINISHED'}
 
 

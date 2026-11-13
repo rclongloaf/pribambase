@@ -72,3 +72,17 @@ class MessagingEncodeTests(unittest.TestCase):
             b"V\x04\x00\x05\x00\xfe\xff\xff\xff\x03\x00\x00\x00"
             b"\x01\x00\x00\x00a",
         )
+
+    def test_generated_image_carries_frame_kind_source_and_pixels(self) -> None:
+        self.assertEqual(
+            self.encode.generated_image(
+                size=(2, 3),
+                frame=12,
+                kind="world-normal",
+                sprite="a",
+                pixels=b"\x10\x20",
+            ),
+            b"D\x02\x00\x03\x00\x0c\x00\x00\x00"
+            b"\x0c\x00\x00\x00world-normal"
+            b"\x01\x00\x00\x00a\x02\x00\x00\x00\x10\x20",
+        )

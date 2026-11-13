@@ -17,9 +17,9 @@ PROJECTION_ELEVATION = math.radians(30.0)
 CAMERA_ROTATION_X = math.radians(60.0)
 CAMERA_DISTANCE = 20.0
 PROJECTION_GROUP_NAME = "PB_GlobalProjection_v1"
-MASTER_GROUP_NAME = "PB_MasterShader_v3"
-MASTER_GROUP_SCHEMA = 3
-PROJECT_MATERIAL_SCHEMA = 3
+MASTER_GROUP_NAME = "PB_MasterShader_v4"
+MASTER_GROUP_SCHEMA = 4
+PROJECT_MATERIAL_SCHEMA = 8
 PIXEL_FILTER_SIZE = 0.01
 
 _scanning = False
@@ -288,6 +288,7 @@ def ensure_master_group() -> bpy.types.ShaderNodeTree:
     emission.default_value = 0.0
     emission_strength = _new_group_socket(tree, "Emission Strength", 'INPUT', 'NodeSocketFloat')
     emission_strength.default_value = 2.0
+    _new_group_socket(tree, "Surface Normal", 'INPUT', 'NodeSocketVector')
     _new_group_socket(tree, "EEVEE Shader", 'OUTPUT', 'NodeSocketShader')
     _new_group_socket(tree, "Cycles Shader", 'OUTPUT', 'NodeSocketShader')
 
@@ -363,6 +364,7 @@ def ensure_master_group() -> bpy.types.ShaderNodeTree:
     links.new(group_input.outputs['Base Color'], eevee_pbr.inputs['Base Color'])
     links.new(group_input.outputs['Roughness'], eevee_pbr.inputs['Roughness'])
     links.new(group_input.outputs['Metallic'], eevee_pbr.inputs['Metallic'])
+    links.new(group_input.outputs['Surface Normal'], eevee_pbr.inputs['Normal'])
     links.new(eevee_pbr.outputs['BSDF'], shader_to_rgb.inputs['Shader'])
     links.new(shader_to_rgb.outputs['Color'], luminance.inputs['Color'])
     links.new(luminance.outputs['Val'], brightness_floor.inputs[0])
@@ -402,6 +404,7 @@ def ensure_master_group() -> bpy.types.ShaderNodeTree:
     links.new(group_input.outputs['Base Color'], cycles_pbr.inputs['Base Color'])
     links.new(group_input.outputs['Roughness'], cycles_pbr.inputs['Roughness'])
     links.new(group_input.outputs['Metallic'], cycles_pbr.inputs['Metallic'])
+    links.new(group_input.outputs['Surface Normal'], cycles_pbr.inputs['Normal'])
     if emission_color_input is not None:
         links.new(group_input.outputs['Base Color'], emission_color_input)
     if emission_strength_input is not None:
@@ -525,24 +528,71 @@ def ensure_project_material(
     projection.node_tree = ensure_projection_group()
     projection.location = (-300, 80)
     projection["pribambase_role"] = "projection"
+    normal_texture = nodes.new('ShaderNodeTexImage')
+    normal_texture.interpolation = 'Closest'
+    normal_texture.extension = 'CLIP'
+    normal_texture.location = (-40, -400)
+    normal_texture["pribambase_role"] = "world-normal"
+    normal_map = nodes.new('ShaderNodeNormalMap')
+    normal_map.space = 'WORLD'
+    normal_map.location = (150, -400)
+    normal_map["pribambase_role"] = "world-normal-map"
+    edit_texture = nodes.new('ShaderNodeTexImage')
+    edit_texture.interpolation = 'Closest'
+    edit_texture.extension = 'CLIP'
+    edit_texture.location = (-40, -620)
+    edit_texture["pribambase_role"] = "normal-edit-preview"
+    edit_preview = nodes.new('ShaderNodeEmission')
+    edit_preview.location = (180, -620)
+    edit_preview["pribambase_role"] = "normal-edit-preview-shader"
+    edit_preview.inputs['Strength'].default_value = 1.0
+    geometry_texture = nodes.new('ShaderNodeTexImage')
+    geometry_texture.interpolation = 'Closest'
+    geometry_texture.extension = 'CLIP'
+    geometry_texture.location = (-40, -800)
+    geometry_texture["pribambase_role"] = "geometry-normal-preview"
+    geometry_preview = nodes.new('ShaderNodeEmission')
+    geometry_preview.location = (180, -800)
+    geometry_preview["pribambase_role"] = "geometry-normal-preview-shader"
+    geometry_preview.inputs['Strength'].default_value = 1.0
+    final_preview = nodes.new('ShaderNodeEmission')
+    final_preview.location = (180, -980)
+    final_preview["pribambase_role"] = "final-normal-preview-shader"
+    final_preview.inputs['Strength'].default_value = 1.0
+    from . import detail
+
+    generated_normal = detail.normal_image(scene)
+    normal_texture.image = generated_normal
+    edit_texture.image = detail.source_image(scene)
+    geometry_texture.image = detail.geometry_normal_image(scene)
+    normal_map.inputs['Strength'].default_value = (
+        1.0 if generated_normal is not None and state.apply_generated_normal else 0.0
+    )
 
     links = material.node_tree.links
     links.new(projection.outputs['Vector'], texture.inputs['Vector'])
     links.new(projection.outputs['Vector'], packed.inputs['Vector'])
+    links.new(projection.outputs['Vector'], normal_texture.inputs['Vector'])
+    links.new(projection.outputs['Vector'], edit_texture.inputs['Vector'])
+    links.new(projection.outputs['Vector'], geometry_texture.inputs['Vector'])
     links.new(texture.outputs['Color'], master.inputs['Base Color'])
     links.new(packed.outputs['Color'], separate.inputs['Color'])
     links.new(separate.outputs['Red'], master.inputs['Ambient Occlusion'])
     links.new(separate.outputs['Green'], master.inputs['Roughness'])
     links.new(separate.outputs['Blue'], master.inputs['Metallic'])
     links.new(packed.outputs['Alpha'], master.inputs['Emission Mask'])
-    links.new(master.outputs['EEVEE Shader'], eevee_output.inputs['Surface'])
-    links.new(master.outputs['Cycles Shader'], cycles_output.inputs['Surface'])
+    links.new(normal_texture.outputs['Color'], normal_map.inputs['Color'])
+    links.new(normal_map.outputs['Normal'], master.inputs['Surface Normal'])
+    links.new(edit_texture.outputs['Color'], edit_preview.inputs['Color'])
+    links.new(geometry_texture.outputs['Color'], geometry_preview.inputs['Color'])
+    links.new(normal_texture.outputs['Color'], final_preview.inputs['Color'])
     material["pribambase_project_material"] = True
     material["pribambase_profile"] = PROFILE_NAME
     material["pribambase_material_schema"] = PROJECT_MATERIAL_SCHEMA
     layout = state_layout(scene)
     if layout is not None:
         update_material_layout(material, layout)
+    _set_project_material_preview(scene, material)
     return material
 
 
@@ -592,6 +642,84 @@ def update_project_material(scene: bpy.types.Scene) -> None:
             node.image = scene.sb_state.projection_image
         elif role == "orme":
             node.image = scene.sb_state.material_image
+        elif role == "world-normal":
+            from . import detail
+
+            node.image = detail.normal_image(scene)
+        elif role == "world-normal-map":
+            from . import detail
+
+            node.inputs['Strength'].default_value = (
+                1.0
+                if detail.normal_image(scene) is not None
+                and scene.sb_state.apply_generated_normal
+                else 0.0
+            )
+        elif role == "normal-edit-preview":
+            from . import detail
+
+            node.image = detail.source_image(scene)
+        elif role == "geometry-normal-preview":
+            from . import detail
+
+            node.image = detail.geometry_normal_image(scene)
+    _set_project_material_preview(scene, material)
+
+
+def _set_project_material_preview(
+    scene: bpy.types.Scene,
+    material: bpy.types.Material,
+    mode: str | None = None,
+) -> None:
+    """Route both render engines to the requested regular or unlit surface."""
+    if material is None or not material.use_nodes:
+        return
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    by_role = {node.get("pribambase_role"): node for node in nodes}
+    selected = scene.sb_state.detail_preview_mode if mode is None else mode
+    if selected == 'NORMAL_EDIT':
+        shader = by_role.get("normal-edit-preview-shader")
+    elif selected == 'GEOMETRY_NORMAL':
+        shader = by_role.get("geometry-normal-preview-shader")
+    elif selected == 'FINAL_NORMAL':
+        shader = by_role.get("final-normal-preview-shader")
+    else:
+        shader = None
+    for source_name, output_role in (
+        ('EEVEE Shader', "eevee-material-output"),
+        ('Cycles Shader', "cycles-material-output"),
+    ):
+        output = by_role.get(output_role)
+        master = by_role.get("master")
+        if output is None or master is None:
+            continue
+        surface = output.inputs.get('Surface')
+        if surface is None:
+            continue
+        for link in tuple(surface.links):
+            links.remove(link)
+        source = (
+            shader.outputs.get('Emission')
+            if shader is not None
+            else master.outputs.get(source_name)
+        )
+        if source is not None:
+            links.new(source, surface)
+
+
+@contextmanager
+def guide_material_context(scene: bpy.types.Scene):
+    """Render Aseprite guides with the real material, never a diagnostic preview."""
+    material = scene.sb_state.projection_material
+    if material is None or scene.sb_state.detail_preview_mode == 'MATERIAL':
+        yield
+        return
+    _set_project_material_preview(scene, material, 'MATERIAL')
+    try:
+        yield
+    finally:
+        _set_project_material_preview(scene, material)
 
 
 def apply_pixel_perfect_render_settings(scene: bpy.types.Scene) -> None:

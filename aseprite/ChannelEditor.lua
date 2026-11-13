@@ -16,20 +16,22 @@ if pribambase_channels_dlg then
     return
 end
 
-local labels = {"Base Color", "Ambient Occlusion", "Roughness", "Metallic", "Emission", "World Normal"}
+local labels = {"Base Color", "Ambient Occlusion", "Roughness", "Metallic", "Emission"}
 local ids = {
     ["Base Color"]="base_color",
     ["Ambient Occlusion"]="ao",
     ["Roughness"]="roughness",
     ["Metallic"]="metallic",
-    ["Emission"]="emission",
-    ["World Normal"]="normal"
+    ["Emission"]="emission"
 }
 local settings = pribambase_settings
 local initialChannel = settings and settings.channelEditorChannel or "Base Color"
 if ids[initialChannel] == nil then initialChannel = "Base Color" end
 local initialTab = settings and settings.channelEditorTab or "paint_tab"
-if initialTab ~= "paint_tab" and initialTab ~= "view_tab" and initialTab ~= "actions_tab" then
+if initialTab ~= "paint_tab"
+    and initialTab ~= "view_tab"
+    and initialTab ~= "generated_tab"
+    and initialTab ~= "actions_tab" then
     initialTab = "paint_tab"
 end
 local dlg
@@ -56,6 +58,7 @@ local function saveDialogState()
         app.events:off(onSiteChange)
         siteChangeRegistered = false
     end
+    pribambase_generated_refresh = nil
     pribambase_channels_dlg = nil
 end
 
@@ -130,6 +133,7 @@ local function updateVisibilityControls()
     local sprite = app.activeSprite
     local base = sprite and Channels.group(sprite, "base_color") or nil
     local guide = Guide.findRenderLayer(sprite)
+    local normal = Guide.findWorldNormalLayer(sprite)
     updatingVisibility = true
     dlg:modify{
         id="base_visible",
@@ -140,6 +144,24 @@ local function updateVisibilityControls()
         id="guide_visible",
         selected=guide ~= nil and guide.isVisible,
         enabled=guide ~= nil
+    }
+    dlg:modify{
+        id="normal_visible",
+        selected=normal ~= nil and normal.isVisible,
+        enabled=normal ~= nil
+    }
+    local frame = app.activeFrame and app.activeFrame.frameNumber or 1
+    local guideCel = guide and guide:cel(frame) or nil
+    local normalCel = normal and normal:cel(frame) or nil
+    dlg:modify{
+        id="render_status",
+        text=guideCel and string.format("Frame %d · %d×%d", frame, guideCel.image.width, guideCel.image.height)
+            or "Waiting for Blender"
+    }
+    dlg:modify{
+        id="normal_status",
+        text=normalCel and string.format("Frame %d · %d×%d · read-only", frame, normalCel.image.width, normalCel.image.height)
+            or "Waiting for Blender normal output"
     }
     updatingVisibility = false
 end
@@ -161,6 +183,27 @@ local function setGuideVisibility()
     if guide ~= nil then guide.isVisible = dlg.data.guide_visible end
     app.refresh()
     updateVisibilityControls()
+end
+
+
+local function setNormalVisibility()
+    if updatingVisibility then return end
+    local sprite = app.activeSprite
+    local normal = Guide.findWorldNormalLayer(sprite)
+    if normal ~= nil then
+        normal.isVisible = dlg.data.normal_visible
+        if normal.isVisible then normal.stackIndex = #sprite.layers end
+    end
+    app.refresh()
+    updateVisibilityControls()
+end
+
+
+local function requestWorldNormal()
+    local frame = app.activeFrame and app.activeFrame.frameNumber or 1
+    if not pribambase_normal_request or not pribambase_normal_request(frame) then
+        app.alert{title="Pribambase", text="Start Sync before requesting World Normal."}
+    end
 end
 
 
@@ -358,7 +401,6 @@ dlg:button{id="base_opacity_default", text="Reset Base Opacity", onclick=functio
     setBaseOpacity(255)
 end}
 dlg:separator{text="Send to Blender"}
-dlg:check{id="guide_visible", label="Show Render Guide", selected=true, onclick=setGuideVisibility}
 dlg:check{id="send_base_color", label="Base Color", selected=true, onclick=function()
     setSendEnabled("send_base_color", "base_color")
 end}
@@ -389,6 +431,16 @@ dlg:button{id="overlay_default", text="Reset Overlay", onclick=function()
     if item ~= nil then setOverlayOpacity(item.previewOpacity) end
 end}
 
+dlg:tab{id="generated_tab", text="Generated"}
+dlg:separator{text="Render Guide"}
+dlg:check{id="guide_visible", label="Show", selected=true, onclick=setGuideVisibility}
+dlg:label{id="render_status", label="Status", text="Waiting for Blender"}
+dlg:separator{text="World Normal"}
+dlg:check{id="normal_visible", label="Show", selected=false, onclick=setNormalVisibility}
+dlg:label{id="normal_status", label="Status", text="Waiting for Blender normal output"}
+dlg:button{id="normal_rebuild", text="Request Rebuild", onclick=requestWorldNormal}
+dlg:label{text="Generated in Blender · read-only"}
+
 dlg:tab{id="actions_tab", text="Actions"}
 dlg:button{id="initialize", text="Initialize / Migrate", onclick=initialize}
 dlg:newrow()
@@ -407,6 +459,9 @@ dlg:endtabs{
 }
 
 pribambase_channels_dlg = dlg
+pribambase_generated_refresh = function()
+    pcall(updateVisibilityControls)
+end
 updatePresets()
 onSiteChange = function()
     pcall(updateVisibilityControls)

@@ -196,3 +196,24 @@ class Frame(Handler):
         from ..workspace import apply_remote_frame
 
         apply_remote_frame(frame)
+
+
+class DetailRequest(Handler):
+    """Rebuild a Blender-owned generated texture requested by Aseprite."""
+
+    id = 'R'
+
+    def parse(self, args):
+        args.frame = self.take_uint(4)
+
+    async def execute(self, *, frame):
+        from .. import detail
+
+        scene = bpy.context.scene
+        try:
+            detail.generate_normal(scene, frame, send=True)
+        except Exception as error:
+            bpy.ops.pribambase.report(
+                message_type='ERROR',
+                message=f"World Normal rebuild failed: {error}",
+            )

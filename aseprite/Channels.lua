@@ -231,13 +231,12 @@ end
 
 function Channels.needsMigration(sprite)
     if not Channels.hasStructure(sprite) then return false end
-    return (tonumber(properties(sprite).channelSchema) or 1) < 5
+    return (tonumber(properties(sprite).channelSchema) or 1) < 6
 end
 
 
 function Channels.group(sprite, channel)
     if channel == "base_color" then return find(sprite, "base-color") end
-    if channel == "normal" then return find(sprite, "world-normal") end
     return find(sprite, "channel", channel)
 end
 
@@ -315,7 +314,25 @@ function Channels.initialize(sprite)
             Channels.ensurePaintDefaults(sprite, true)
             removeDefaultLayers(sprite)
         end
-        if spriteProperties.channelSchema ~= 5 then spriteProperties.channelSchema = 5 end
+        if schema < 6 then
+            local normal = find(sprite, "world-normal")
+            if normal ~= nil then
+                local generatedOnly = true
+                for _,layer in ipairs(normal.layers) do
+                    if not matches(layer, "normal-generated", "normal") then
+                        generatedOnly = false
+                        break
+                    end
+                end
+                if generatedOnly then
+                    sprite:deleteLayer(normal)
+                else
+                    normal.name = "World Normal (Legacy)"
+                    normal.isVisible = false
+                end
+            end
+        end
+        if spriteProperties.channelSchema ~= 6 then spriteProperties.channelSchema = 6 end
         return root, false
     end
 
@@ -341,14 +358,8 @@ function Channels.initialize(sprite)
         properties(group).previewOpacity = item.previewOpacity
     end
 
-    local normal = createGroup(sprite, root, "World Normal", "world-normal")
-    normal.color = Color{r=128, g=160, b=255, a=255}
-    local generated = createLayer(sprite, normal, "Generated from Blender", "normal-generated", "normal")
-    generated.isEditable = false
-    generated.opacity = 96
-
     Channels.ensurePaintDefaults(sprite, true)
-    properties(sprite).channelSchema = 5
+    properties(sprite).channelSchema = 6
     return root, true
 end
 
@@ -473,7 +484,6 @@ function Channels.activate(sprite, channel, value)
     local root = find(sprite, "channels-root")
     local base = find(sprite, "base-color")
     local material = find(sprite, "material-root")
-    local normal = find(sprite, "world-normal")
     local scalar = definition(channel)
 
     root.isVisible = true
@@ -481,7 +491,6 @@ function Channels.activate(sprite, channel, value)
     -- visible for context; group opacity is intentionally ignored by the
     -- deterministic channel compositor below.
     material.isVisible = scalar ~= nil
-    normal.isVisible = channel == "normal"
     for _,item in ipairs(Channels.definitions) do
         Channels.group(sprite, item.id).isVisible = scalar ~= nil and item.id == scalar.id
     end
@@ -492,8 +501,6 @@ function Channels.activate(sprite, channel, value)
         app.fgColor = Color{r=gray, g=gray, b=gray, a=255}
     elseif channel == "base_color" and #base.layers > 0 then
         app.activeLayer = base.layers[#base.layers]
-    elseif channel == "normal" then
-        app.activeLayer = find(sprite, "normal-generated", "normal")
     end
     app.refresh()
 end

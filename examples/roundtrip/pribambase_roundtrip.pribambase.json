@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "asset": "Roundtrip Cube",
   "sources": {
     "blender": "pribambase_roundtrip.blend",
@@ -36,5 +36,12 @@
       "origin_x": 32,
       "origin_y": 32
     }
+  },
+  "surface_detail": {
+    "source": "world_normal",
+    "edit_scale": 2,
+    "apply_generated_normal": true,
+    "auto_rebuild": true,
+    "auto_send": true
   }
 }

@@ -24,6 +24,7 @@ import bpy
 from .addon import addon
 from . import workspace
 from . import projection
+from . import detail
 import numpy as np
 from math import pi
 
@@ -132,10 +133,16 @@ class SB_PT_panel_link(bpy.types.Panel):
             text="Recalculate Canvas",
             icon='FILE_REFRESH',
         )
-        actions.operator(
+        camera_actions = projected.row(align=True)
+        camera_actions.operator(
             "pribambase.projection_restore_camera",
             text="Restore Camera",
             icon='VIEW_CAMERA',
+        )
+        camera_actions.operator(
+            "pribambase.projection_view_camera",
+            text="View Camera",
+            icon='CAMERA_DATA',
         )
         projected.operator(
             "pribambase.projection_setup_material",
@@ -144,6 +151,132 @@ class SB_PT_panel_link(bpy.types.Panel):
         )
         if state.projection_material is not None:
             projected.label(text=f"Material: {state.projection_material.name}", icon='CHECKMARK')
+
+        surface = layout.box()
+        surface.label(text="World Normal Edit", icon='NORMALS_FACE')
+        canvas = projection.state_layout(context.scene)
+        source = detail.source_image(context.scene)
+        normal = detail.normal_image(context.scene)
+        geometry_normal = detail.geometry_normal_image(context.scene)
+        if canvas is None:
+            warning = surface.row()
+            warning.alert = True
+            warning.label(text="Calculate the animation canvas first", icon='ERROR')
+        else:
+            surface.label(
+                text=(
+                    f"Frame {context.scene.frame_current} · Edit "
+                    f"{canvas.width * detail.EDIT_SCALE}×{canvas.height * detail.EDIT_SCALE} "
+                    f"→ Output {canvas.width}×{canvas.height}"
+                ),
+                icon='IMAGE_DATA',
+            )
+            if source is None:
+                surface.label(text="Normal Edit: not initialized for this frame", icon='INFO')
+            else:
+                surface.label(text=f"Normal Edit: {source.name}", icon='KEYFRAME')
+            if geometry_normal is not None:
+                surface.label(text=f"Geometry Normal: {geometry_normal.name}", icon='LOCKED')
+            if context.scene.frame_current in detail.geometry_dirty_frames():
+                warning = surface.row()
+                warning.alert = True
+                warning.label(text="Geometry changed — reset source if needed", icon='ERROR')
+
+        preview = surface.column(align=True)
+        preview.prop(state, "detail_preview_mode", expand=True)
+        if state.detail_preview_mode == 'NORMAL_EDIT' and source is None:
+            warning = preview.row()
+            warning.alert = True
+            warning.label(text="Initialize Normal Edit to preview it", icon='ERROR')
+        elif state.detail_preview_mode == 'GEOMETRY_NORMAL' and geometry_normal is None:
+            warning = preview.row()
+            warning.alert = True
+            warning.label(text="Reset from Geometry to create the reference", icon='ERROR')
+        elif state.detail_preview_mode == 'FINAL_NORMAL' and normal is None:
+            warning = preview.row()
+            warning.alert = True
+            warning.label(text="Rebuild World Normal to create Final", icon='ERROR')
+        preview.label(text="Preview is unlit; Aseprite guide stays Material", icon='SHADING_RENDERED')
+        preview.label(text="Use Material Preview or Rendered viewport", icon='INFO')
+
+        frames = surface.row(align=True)
+        frames.enabled = canvas is not None
+        frames.operator(
+            "pribambase.detail_initialize",
+            text="Reset from Geometry" if source is not None else "Initialize from Geometry",
+            icon='RENDER_STILL',
+        )
+        remove = frames.row(align=True)
+        remove.enabled = source is not None
+        remove.operator("pribambase.detail_remove_source", text="Remove Frame", icon='X')
+
+        brush = surface.column(align=True)
+        brush.enabled = source is not None
+        brush.prop(state, "detail_brush_mode")
+        if state.detail_brush_mode != 'SET':
+            values = brush.row(align=True)
+            values.prop(state, detail.brush_radius_property(state.detail_brush_mode))
+            values.prop(state, "detail_brush_strength")
+        if state.detail_brush_mode in {'PAINT', 'SET'}:
+            target = brush.row(align=True)
+            target.prop(state, "detail_normal_target")
+            target.operator("pribambase.detail_pick_normal", text="", icon='EYEDROPPER')
+            target.operator(
+                "pribambase.detail_free_pick_normal",
+                text="",
+                icon='ORIENTATION_GIMBAL',
+            )
+            picker = brush.row(align=True)
+            picker.prop(state, "detail_picker_mode", expand=True)
+            if state.detail_picker_mode == 'QUANTIZED':
+                divisions = state.detail_picker_divisions
+                brush.prop(state, "detail_picker_divisions", slider=True)
+                brush.label(
+                    text=f"1/{divisions} of 90° = {90.0 / divisions:g}°",
+                    icon='DRIVER_ROTATIONAL_DIFFERENCE',
+                )
+        if state.detail_brush_mode == 'SET':
+            brush.prop(state, "detail_set_size")
+            brush.prop(state, "detail_pixel_scope")
+            unit = "output pixels" if state.detail_pixel_scope == 'OUTPUT' else "edit samples"
+            brush.label(text=f"Exact {state.detail_set_size}×{state.detail_set_size} {unit}", icon='SNAP_GRID')
+        else:
+            radius_name = detail.brush_radius_property(state.detail_brush_mode)
+            radius = getattr(state, radius_name)
+            brush.label(
+                text=f"Radius {radius} px = {radius * detail.EDIT_SCALE} edit samples",
+                icon='BRUSH_DATA',
+            )
+        brush.label(text="Q/E or 1–5 tool · Ctrl+Wheel radius/size", icon='INFO')
+        brush.label(text="Alt+Wheel strength", icon='MODIFIER')
+        brush.label(text="MMB pan · Wheel view zoom", icon='VIEWZOOM')
+        brush.label(text="Ctrl+Z undo · Ctrl+Y redo · Enter/Esc save", icon='LOOP_BACK')
+        brush.label(text="Alt pick visible normal · Shift smooth", icon='INFO')
+        brush.label(text="N free Normal Ball", icon='ORIENTATION_GIMBAL')
+        brush.label(text="Tab/Shift+Tab cycle · Shift+1–4 preview", icon='INFO')
+        brush.operator("pribambase.detail_paint", text="Paint Normals", icon='BRUSH_DATA')
+
+        shader = surface.column(align=True)
+        apply_row = shader.row()
+        apply_row.enabled = normal is not None
+        apply_row.prop(state, "apply_generated_normal")
+        shader.prop(state, "detail_auto_rebuild")
+        shader.prop(state, "detail_auto_send")
+        if context.scene.frame_current in detail.dirty_frames():
+            shader.label(text="World Normal is out of date", icon='ERROR')
+        elif normal is not None:
+            shader.label(text=f"World Normal: {normal.name}", icon='CHECKMARK')
+        elif source is not None:
+            shader.label(text="World Normal is out of date", icon='ERROR')
+
+        detail_actions = surface.row(align=True)
+        detail_actions.operator("pribambase.detail_rebuild", text="Rebuild + Send", icon='FILE_REFRESH')
+        if detail.dirty_frames():
+            surface.operator(
+                "pribambase.detail_rebuild_dirty",
+                text=f"Rebuild Dirty Frames ({len(detail.dirty_frames())})",
+                icon='RENDER_ANIMATION',
+            )
 
         if addon.server_up:
             sync = layout.box()

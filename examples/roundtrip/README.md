@@ -61,6 +61,40 @@ The cube intentionally has no UV layer. `PB_Roundtrip_Cube_Projected` samples th
 fixed world coordinates, while **Restore Camera** only restores the matching inspection view.
 The shared animation canvas is stored in the pair manifest and applies to all 12 frames.
 
+## Blender direct World Normal editing
+
+1. In Blender open **Pribambase → World Normal Edit** on frame 1 and press **Initialize from Geometry**.
+2. Choose a target world direction, Radius/Strength, and press **Paint Normals**.
+3. Paint on the cube with LMB and finish with `Enter`; use `Q/E` or `1–5` to switch tools, Ctrl+wheel
+   for the active tool radius/size, Alt+wheel for strength, MMB/wheel to pan/zoom the camera view,
+   and Tab/Shift+Tab to cycle previews. Shift+1–4 directly select Edited/Final/Geometry/Material.
+   Ctrl+Z/Ctrl+Y undo and redo individual strokes; Enter, Esc, and RMB all
+   finish the mode while saving the current result.
+4. Keep **Apply Generated World Normal** enabled to see the result in the material and guide.
+5. In Aseprite open the **Generated** tab and enable **World Normal → Show**.
+
+The sample canvas is `64×64`, so Blender stores a `128×128` editable World Normal source and derives
+a `64×64` RGB output by averaging and renormalizing each 2×2 block. The source remains editable only
+in the `.blend`; the output arrives in Aseprite as a locked per-frame reference layer. Each animation
+frame is initialized separately so deformed geometry keeps its own sharp surface transitions.
+
+Use **Material / Edited / Geometry / Final** to compare the regular shader, editable encoded RGB
+vectors, the immutable geometry bake, and the final 1× map used by the material. The eyedropper and
+`Alt+LMB` sample the visible Edited, Geometry, or Final map. **Bulge** and **Dent** create projected
+bumps and cavities directly in the
+normal vectors; Paint, Smooth, Bulge, and Dent remember separate Ctrl+wheel-adjustable radii. **Set Pixel**
+writes an exact normalized direction with its own Ctrl+wheel-adjustable square Size. Its unit is either a
+final Output Pixel (expanded to 2×2 edit samples) or an individual Edit Sample.
+Decreasing below Output Size 1 automatically selects the smallest Edit Sample 1×1 step; increasing
+crosses back through Output Size 1 before Size 2.
+
+Press `N` while painting, or use the gizmo button next to the eyedropper, to open the viewport Normal
+Ball. It shows global XYZ axes plus selected/current arrows on the model. Continuous mode accepts any
+camera-facing unit direction. Quantized mode subdivides every 90° great-circle arc between signed
+global axes: `1/2 = 45°`, `1/3 = 30°`, `1/4 = 22.5°` by default, through `1/12 = 7.5°`.
+Interior directions are generated symmetrically without Euler rotation order. Use `Q` for mode, the
+wheel for the division count, and LMB/Enter to accept.
+
 ## Rebuild and validate
 
 The generated assets are checked in so the example is ready immediately. To recreate them:

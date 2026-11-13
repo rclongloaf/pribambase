@@ -61,8 +61,10 @@ else
     local settings = pribambase_settings
     local ws
     local connected = false
+    local connecting = false
     local stopping = false
     local reconnectTimer
+    local reconnectAttempt = 0
     -- the list of texures open in blender
     local syncList = {}
     -- map MessageID to handler callback
@@ -336,6 +338,65 @@ else
 
         Guide.updateCelPixels(refCel, renderImage)
         app.refresh()
+        if pribambase_generated_refresh then pribambase_generated_refresh() end
+    end
+
+
+    -- Blender owns this texture. It is stored as a locked reference cel and
+    -- refreshed through Image.bytes so generated updates never enter Undo.
+    local function show_world_normal(w, h, frameNumber, data)
+        if spr == nil then return end
+        if spr.colorMode ~= ColorMode.RGB then
+            error("Generated World Normal requires an RGB sprite")
+        end
+        while #spr.frames < frameNumber do spr:newEmptyFrame() end
+        local frameObject = spr.frames[frameNumber]
+        local layer = Guide.findWorldNormalLayer(spr)
+        local cel = layer and layer:cel(frameObject) or nil
+        local image = Image(w, h, ColorMode.RGB)
+        image.bytes = data
+        if w ~= spr.width or h ~= spr.height then image:resize(spr.width, spr.height) end
+
+        local needsSetup = layer == nil
+            or cel == nil
+            or not Guide.imageMatches(cel, image)
+            or not Guide.isWorldNormalLayer(layer)
+            or layer.isEditable
+            or cel.position.x ~= 0
+            or cel.position.y ~= 0
+
+        if needsSetup then
+            app.transaction("Prepare Pribambase World Normal", function()
+                if layer == nil then
+                    local name = "Pribambase World Normal"
+                    for _,candidate in ipairs(spr.layers) do
+                        if candidate.name == name and not candidate.isReference then
+                            name = name .. " (Generated)"
+                            break
+                        end
+                    end
+                    local active = app.activeLayer
+                    app.command.NewLayer{reference=true}
+                    layer = app.activeLayer
+                    layer.name = name
+                    layer.opacity = 255
+                    layer.isVisible = false
+                    app.activeLayer = active
+                end
+                cel = Guide.ensureCel(spr, layer, frameObject, image)
+                if not Guide.imageMatches(cel, image) then cel.image = image end
+                Guide.markWorldNormalLayer(layer)
+                if cel.position.x ~= 0 or cel.position.y ~= 0 then
+                    cel.position = Point(0, 0)
+                end
+                if layer.isEditable then layer.isEditable = false end
+            end)
+        end
+
+        Guide.updateCelPixels(cel, image)
+        layer.properties("lampysprites/pribambase").lastFrame = frameNumber
+        app.refresh()
+        if pribambase_generated_refresh then pribambase_generated_refresh() end
     end
 
 
@@ -363,7 +424,7 @@ else
         local paired = matchesPairedSprite(spr)
         if spr and spr == app.activeSprite and (syncList[sprfile] or paired) and spr.filename ~= sprfile then
             -- renamed
-            if sprfile ~= "" and not paired then
+            if sprfile ~= "" and not paired and connected and ws ~= nil then
                 ws:sendBinary(messageChangeName{ from=sprfile, to=spr.filename })
             end
             sprfile = spr.filename
@@ -437,10 +498,15 @@ else
     local function cleanup()
         stopping = true
         if reconnectTimer ~= nil then reconnectTimer:stop() end
-        if ws ~= nil then ws:close() end
+        connected = false
+        connecting = false
+        local socket = ws
+        ws = nil
+        if socket ~= nil then pcall(function() socket:close() end) end
         if dlg ~= nil then dlg:close() dlg = nil end
         pribambase_dlg = nil
         pribambase_channel_refresh = nil
+        pribambase_normal_request = nil
         if spr~=nil then spr.events:off(syncSprite) end
         app.events:off(onAppChange)
     end
@@ -479,6 +545,37 @@ else
         pause_app_change = true
         local ok, errorMessage = pcall(function()
             show_uv(w, h, opacity, layer, pixels)
+        end)
+        pause_app_change = false
+        if not ok then error(errorMessage) end
+    end
+
+
+    local function handleGeneratedImage(msg)
+        local _id, w, h, frameNumber, kind, source, pixels =
+            string.unpack("<BHHI4s4s4s4", msg)
+        if kind ~= "world-normal" then return end
+
+        if source ~= "" then
+            local found = false
+            for _,candidate in ipairs(app.sprites) do
+                if candidate.filename == source
+                    or (source == pairedRemoteSource and matchesPairedSprite(candidate)) then
+                    if source == pairedRemoteSource then pairedSprite = candidate end
+                    app.activeSprite = candidate
+                    found = true
+                    break
+                end
+            end
+            if not found then return end
+            onAppChange()
+        elseif spr == nil then
+            return
+        end
+
+        pause_app_change = true
+        local ok, errorMessage = pcall(function()
+            show_world_normal(w, h, frameNumber, pixels)
         end)
         pause_app_change = false
         if not ok then error(errorMessage) end
@@ -678,32 +775,47 @@ else
         [string.byte('A')] = handleFrame,
         [string.byte('G')] = handleGuideFrame,
         [string.byte('W')] = handleWorkspace,
+        [string.byte('D')] = handleGeneratedImage,
     }
 
 
     --[[ UI callbacks ]]
 
-    -- t is for type, there's already a lua function
-    local function receive(t, message)
+    local function updateConnectionStatus(text, reconnectVisible)
+        if dlg == nil then return end
+        pcall(function() dlg:modify{ id="status", text=text } end)
+        pcall(function() dlg:modify{ id="reconnect_now", visible=reconnectVisible } end)
+    end
+
+
+    -- Aseprite WebSocket instances are one-shot on some versions: calling
+    -- connect() again after CLOSE can leave them permanently closed. Every
+    -- attempt therefore gets a fresh socket, and stale callbacks are ignored.
+    local function receive(socket, t, message)
+        if socket ~= ws then return end
         if t == WebSocketMessageType.BINARY then
             local id = string.unpack("<B", message)
             handlers[id](message)
             -- pcall(handlers[id], message) TODO uncommet
 
         elseif t == WebSocketMessageType.OPEN then
+            connecting = false
             connected = true
+            reconnectAttempt = 0
             sentTexturePayloads:clear()
             reconnectTimer:stop()
-            dlg:modify{ id="status", text="Sync active" }
+            updateConnectionStatus("Sync active", false)
 
             if spr ~= nil then
                 spr.events:on("change", syncSprite)
             end
 
-        elseif t == WebSocketMessageType.CLOSE and dlg ~= nil then
+        elseif t == WebSocketMessageType.CLOSE then
             connected = false
+            connecting = false
+            ws = nil
             sentTexturePayloads:clear()
-            dlg:modify{ id="status", text="Waiting for Blender..." }
+            updateConnectionStatus("Disconnected · retrying automatically...", true)
             if spr ~= nil then
                 spr.events:off(syncSprite)
             end
@@ -714,12 +826,50 @@ else
     end
 
 
-    -- set up a websocket
-    ws = WebSocket{
-        url=table.concat{"http://", settings.host, ":", settings.port},
-        onreceive=receive,
-        deflate=false
-    }
+    local function newWebSocket()
+        local socket
+        socket = WebSocket{
+            url=table.concat{"http://", settings.host, ":", settings.port},
+            onreceive=function(t, message) receive(socket, t, message) end,
+            deflate=false
+        }
+        return socket
+    end
+
+
+    local function connectNow()
+        if stopping or connected or connecting then return false end
+        reconnectAttempt = reconnectAttempt + 1
+        connecting = true
+        updateConnectionStatus(
+            "Connecting to Blender · attempt " .. tostring(reconnectAttempt) .. "...",
+            true
+        )
+        local socket = newWebSocket()
+        ws = socket
+        local ok = pcall(function() socket:connect() end)
+        if not ok and ws == socket then
+            ws = nil
+            connecting = false
+            updateConnectionStatus("Connection failed · retrying automatically...", true)
+            if not stopping then reconnectTimer:start() end
+        end
+        return ok
+    end
+
+
+    local function reconnectNow()
+        if stopping then return end
+        if spr ~= nil and connected then spr.events:off(syncSprite) end
+        connected = false
+        connecting = false
+        sentTexturePayloads:clear()
+        local socket = ws
+        ws = nil
+        if socket ~= nil then pcall(function() socket:close() end) end
+        reconnectTimer:stop()
+        connectNow()
+    end
 
 
     -- Channel Editor calls this after explicit rebuild actions. Normal brush
@@ -738,12 +888,19 @@ else
         end
     end
 
+
+    pribambase_normal_request = function(frameNumber)
+        if connected and ws ~= nil then
+            ws:sendBinary(string.pack("<BI4", string.byte('R'), frameNumber or 1))
+            return true
+        end
+        return false
+    end
+
     reconnectTimer = Timer{
         interval=2.0,
         ontick=function()
-            if not connected and not stopping then
-                pcall(function() ws:connect() end)
-            end
+            if not connected and not connecting and not stopping then connectNow() end
         end
     }
 
@@ -769,12 +926,16 @@ else
         menu:close()
         app.command.SbMaterialChannels()
     end }
-    menu:button{ id="reconnect", text="Reconnect", onclick=function() menu:close() ws:close() ws:connect() end }
+    menu:button{ id="reconnect", text="Reconnect Now", onclick=function()
+        menu:close()
+        reconnectNow()
+    end }
     menu:separator()
     menu:button{ id="settings", text="* Settings", onclick=function() menu:close() app.command.SbSyncSettings() end }
     menu:button{ id="back", text="< Back", focus=true}
 
     dlg:label{ id="status", label="Status", text="Connecting..." }
+    dlg:button{ id="reconnect_now", text="Reconnect Now", visible=false, onclick=reconnectNow }
     dlg:label{ id="source", label="Source", text=spr and app.fs.fileName(spr.filename) or "No sprite" }
     dlg:button{ id="actions", text="> Menu", onclick=showMenu, focus=true }
     dlg:newrow()
@@ -787,7 +948,7 @@ else
         -- plugin is loading now
         -- FIXME remove this condition, it's not needed
         if pribambase_settings.autostart then
-            ws:connect()
+            connectNow()
             showChannelEditor()
 
             if pribambase_settings.autoshow then
@@ -796,7 +957,7 @@ else
         end
     else
         -- launched from the menu
-        ws:connect()
+        connectNow()
         dlg:show{ wait=false }
         showChannelEditor()
     end

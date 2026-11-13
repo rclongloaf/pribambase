@@ -1,11 +1,16 @@
 # Pribambase
 
-Pribambase 2.3 связывает исходную пиксельную текстуру Aseprite с моделью Blender:
+Pribambase 2.4 связывает исходную пиксельную текстуру Aseprite с моделью Blender:
 
 - изменения paint-слоёв Aseprite сразу видны на модели;
 - AO, Roughness, Metallic и Emission рисуются как понятные grayscale-слои и автоматически собираются в ORME;
 - изменения модели и света возвращаются как pixel-perfect reference-guides без сглаживания;
 - материал использует фиксированную world-space проекцию без покадровых UV;
+- World Normal редактируется прямо по модели в Blender в разрешении 2× и усредняется блоками 2×2;
+- normal map имеет unlit-предпросмотр edited/geometry/final, точный Pixel Set и пипетку направления;
+- viewport Normal Ball задаёт свободные или углово-квантизированные направления с world-space гизмо;
+- кисти Bulge и Dent создают выпуклости и впадины напрямую в нормалях, с отдельными радиусами;
+- World Normal автоматически применяется в шейдере и отправляется в read-only слой Aseprite;
 - один canvas рассчитывается по максимальным bounds всей анимации и безопасно растёт в Aseprite;
 - кадры Blender и Aseprite могут переключаться синхронно;
 - `.blend` и `.aseprite` объединяются переносимым `*.pribambase.json` манифестом.
@@ -39,6 +44,7 @@ Pribambase 2.3 связывает исходную пиксельную текс
 - `aseprite/` — Aseprite extension;
 - `blender/workspace.py` — source pair и автоматические проекции;
 - `blender/projection.py` — глобальная проекция, общий canvas, камера и материал;
+- `blender/detail.py` — direct-normal кисть, downsample и передача World Normal;
 - `examples/roundtrip/` — готовая пара исходников;
 - `tests/` — unit, Blender и Aseprite smoke tests.
 

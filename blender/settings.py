@@ -31,6 +31,20 @@ def _update_project_material(self, context) -> None:
     projection.update_project_material(context.scene)
 
 
+def _update_apply_generated_normal(self, context) -> None:
+    from . import projection, workspace
+
+    projection.update_project_material(context.scene)
+    workspace.mark_current_frame_dirty(context.scene)
+
+
+def _update_detail_preview(self, context) -> None:
+    from . import projection, util
+
+    projection.update_project_material(context.scene)
+    util.refresh()
+
+
 
 class SB_State(bpy.types.PropertyGroup):
     asset_name: bpy.props.StringProperty(
@@ -118,6 +132,150 @@ class SB_State(bpy.types.PropertyGroup):
         min=0.0,
         max=100.0,
         update=_update_project_material,
+    )
+
+    apply_generated_normal: bpy.props.BoolProperty(
+        name="Apply Generated World Normal",
+        description="Use the generated world-space normal texture in the project shader",
+        default=True,
+        update=_update_apply_generated_normal,
+    )
+
+    detail_auto_rebuild: bpy.props.BoolProperty(
+        name="Auto Rebuild",
+        description="Downsample World Normal when a direct-normal stroke finishes",
+        default=True,
+    )
+
+    detail_auto_send: bpy.props.BoolProperty(
+        name="Auto Send to Aseprite",
+        description="Send each generated World Normal to its read-only Aseprite output layer",
+        default=True,
+    )
+
+    detail_brush_mode: bpy.props.EnumProperty(
+        name="Brush",
+        description="Operation performed on the editable world-normal source",
+        items=(
+            ('PAINT', "Paint Direction", "Blend pixels toward the selected world-normal direction"),
+            ('SET', "Set Pixel", "Replace one selected pixel with the exact direction"),
+            ('SMOOTH', "Smooth", "Average nearby world-normal directions"),
+            ('BULGE', "Bulge", "Tilt normals outward to create a projected convex bump"),
+            ('DENT', "Dent", "Tilt normals inward to create a projected concave dent"),
+        ),
+        default='PAINT',
+    )
+
+    detail_brush_radius: bpy.props.IntProperty(
+        name="Radius",
+        description="Brush radius in final texture pixels (Normal Edit uses two samples per pixel)",
+        default=2,
+        min=1,
+        max=256,
+    )
+
+    detail_set_size: bpy.props.IntProperty(
+        name="Size",
+        description="Exact square Set area in output pixels or individual edit samples",
+        default=1,
+        min=1,
+        max=256,
+    )
+
+    detail_smooth_radius: bpy.props.IntProperty(
+        name="Radius",
+        description="Smooth brush radius in final texture pixels",
+        default=2,
+        min=1,
+        max=256,
+    )
+
+    detail_bulge_radius: bpy.props.IntProperty(
+        name="Radius",
+        description="Bulge brush radius in final texture pixels",
+        default=4,
+        min=1,
+        max=256,
+    )
+
+    detail_dent_radius: bpy.props.IntProperty(
+        name="Radius",
+        description="Dent brush radius in final texture pixels",
+        default=4,
+        min=1,
+        max=256,
+    )
+
+    detail_brush_strength: bpy.props.FloatProperty(
+        name="Strength",
+        description="Blend amount applied by one normal brush dab",
+        default=0.35,
+        min=0.0001,
+        max=1.0,
+        precision=4,
+    )
+
+    detail_normal_target: bpy.props.FloatVectorProperty(
+        name="World Normal",
+        description="Target world-space direction; it is normalized before painting",
+        size=3,
+        subtype='DIRECTION',
+        default=(0.0, 0.0, 1.0),
+        min=-1.0,
+        max=1.0,
+        precision=3,
+    )
+
+    detail_picker_mode: bpy.props.EnumProperty(
+        name="Normal Picker",
+        description="Choose arbitrary or angularly quantized world-normal directions",
+        items=(
+            ('CONTINUOUS', "Continuous", "Pick any camera-facing unit normal"),
+            ('QUANTIZED', "Quantized", "Snap to a symmetric angular normal palette"),
+        ),
+        default='QUANTIZED',
+    )
+
+    detail_picker_divisions: bpy.props.IntProperty(
+        name="Arc Divisions",
+        description=(
+            "Divide every 90 degree great-circle arc between signed global axes "
+            "into this many equal angular steps"
+        ),
+        default=4,
+        min=2,
+        max=12,
+    )
+
+    detail_pixel_scope: bpy.props.EnumProperty(
+        name="Pixel Size",
+        description="Area replaced with the exact world-normal direction",
+        items=(
+            ('OUTPUT', "Output Pixel (2×2)", "Set all four editable samples behind one final pixel"),
+            ('EDIT', "Edit Sample (1×1)", "Set one sample in the doubled-resolution source"),
+        ),
+        default='OUTPUT',
+    )
+
+    detail_preview_mode: bpy.props.EnumProperty(
+        name="Preview",
+        description="Switch between material, edited normals, and the original geometry-normal bake",
+        items=(
+            ('NORMAL_EDIT', "Edited", "Show the editable 2× encoded world-normal RGB without lighting"),
+            (
+                'FINAL_NORMAL',
+                "Final",
+                "Show the base-resolution World Normal actually used by the material",
+            ),
+            (
+                'GEOMETRY_NORMAL',
+                "Geometry",
+                "Show the immutable base-resolution normal map generated from geometry",
+            ),
+            ('MATERIAL', "Material", "Show the regular lit project material"),
+        ),
+        default='MATERIAL',
+        update=_update_detail_preview,
     )
 
     projection_padding: bpy.props.IntProperty(

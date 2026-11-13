@@ -163,7 +163,10 @@ from .async_loop import *
 from .settings import *
 from .sync import *
 from .ui_3d import *
+from .detail import *
 from . import projection
+from . import detail
+from . import normal_picker
 from . import workspace
 from .workspace import *
 from .util import *
@@ -175,7 +178,7 @@ bl_info = {
     "author": "lampysprites",
     "description": "Paint pixelart textures in Blender using Aseprite",
     "blender": (4, 0, 0),
-    "version": (2, 3, 0),
+    "version": (2, 4, 0),
     "location": "\"Pribambase\" panel in the 3D Viewport sidebar",
     "category": "Paint"
 }
@@ -196,7 +199,15 @@ classes = (
     SB_OT_projection_dirty,
     SB_OT_projection_recalculate,
     SB_OT_projection_restore_camera,
+    SB_OT_projection_view_camera,
     SB_OT_projection_setup_material,
+    SB_OT_detail_initialize,
+    SB_OT_detail_remove_source,
+    SB_OT_detail_rebuild,
+    SB_OT_detail_rebuild_dirty,
+    SB_OT_detail_pick_normal,
+    SB_OT_detail_free_pick_normal,
+    SB_OT_detail_paint,
     SB_OT_texture_list,
     SB_PT_panel_link,
 
@@ -247,6 +258,7 @@ def unregister():
         bpy.app.handlers.save_post.remove(sb_on_save_post)
 
     workspace.reset_runtime()
+    normal_picker.stop_all()
 
     del bpy.types.Scene.sb_state
     del bpy.types.Image.sb_source

@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import bpy
+import numpy as np
 from bpy_extras.object_utils import world_to_camera_view
 from mathutils import Vector
 
@@ -73,9 +74,44 @@ def main() -> None:
         assert hasattr(bpy.ops.pribambase, "projection_current")
         assert hasattr(bpy.ops.pribambase, "projection_recalculate")
         assert hasattr(bpy.ops.pribambase, "projection_restore_camera")
+        assert hasattr(bpy.ops.pribambase, "projection_view_camera")
         assert hasattr(bpy.ops.pribambase, "projection_setup_material")
+        assert hasattr(bpy.ops.pribambase, "detail_paint")
+        assert hasattr(bpy.ops.pribambase, "detail_initialize")
+        assert hasattr(bpy.ops.pribambase, "detail_pick_normal")
+        assert hasattr(bpy.ops.pribambase, "detail_free_pick_normal")
+        assert hasattr(bpy.ops.pribambase, "detail_rebuild")
 
         projection = importlib.import_module(f"{ADDON_MODULE_NAME}.projection")
+        normal_picker = importlib.import_module(f"{ADDON_MODULE_NAME}.normal_picker")
+        assert state.detail_picker_mode == 'QUANTIZED'
+        assert state.detail_picker_divisions == 4
+        assert normal_picker.direction_from_disk(0.0, 0.0).dot(normal_picker.FRONT) > 0.999
+        assert normal_picker.direction_from_disk(1.0, 0.0).dot(normal_picker.RIGHT) > 0.999
+        direction_counts = []
+        for divisions in (2, 3, 4):
+            directions = normal_picker.palette_directions(divisions)
+            direction_counts.append(len(directions))
+            assert all(
+                math.isclose(direction.length, 1.0, abs_tol=1e-6)
+                for direction in directions
+            )
+        assert direction_counts == sorted(direction_counts)
+        half_xz = Vector((1.0, 0.0, 1.0)).normalized()
+        assert any(
+            half_xz.dot(direction) > 0.999999
+            for direction in normal_picker.palette_directions(2)
+        )
+        third_xz = Vector((math.cos(math.radians(30.0)), 0.0, math.sin(math.radians(30.0))))
+        assert any(
+            third_xz.dot(direction) > 0.999999
+            for direction in normal_picker.palette_directions(3)
+        )
+        quantized = normal_picker.quantize_direction((0.2, -0.5, 0.8), 4)
+        assert any(
+            quantized.dot(direction) > 0.999999
+            for direction in normal_picker.palette_directions(4)
+        )
         scene = bpy.context.scene
         cube = bpy.data.objects["Cube"]
         scene.frame_start = 1
@@ -143,9 +179,9 @@ def main() -> None:
             if node.get("pribambase_role") == "master"
         )
         master_tree = master.node_tree
-        assert material.get("pribambase_material_schema") == 3
-        assert master_tree.name == "PB_MasterShader_v3"
-        assert master_tree.get("pribambase_material_schema") == 3
+        assert material.get("pribambase_material_schema") == 8
+        assert master_tree.name == "PB_MasterShader_v4"
+        assert master_tree.get("pribambase_material_schema") == 4
         assert master_tree.get("pribambase_ao_mode") == "light-weighted-eevee"
         assert master.outputs.get("EEVEE Shader") is not None
         assert master.outputs.get("Cycles Shader") is not None
@@ -153,6 +189,7 @@ def main() -> None:
         assert master.inputs.get("Roughness") is not None
         assert master.inputs.get("Metallic") is not None
         assert master.inputs.get("Emission Mask") is not None
+        assert master.inputs.get("Surface Normal") is not None
 
         def role(name):
             return next(
@@ -182,6 +219,10 @@ def main() -> None:
             assert any(
                 link.from_node == group_input and link.from_socket.name == "Metallic"
                 for link in pbr.inputs['Metallic'].links
+            )
+            assert any(
+                link.from_node == group_input and link.from_socket.name == "Surface Normal"
+                for link in pbr.inputs['Normal'].links
             )
         assert not any(
             link.to_node in {eevee_pbr, cycles_pbr}
@@ -217,18 +258,233 @@ def main() -> None:
         state.emission_strength = 3.5
         assert master.inputs["Emission Strength"].default_value == 3.5
 
-        # Existing v2 project materials are rebuilt in-place and keep their
+        # Existing project materials are rebuilt in-place and keep their
         # scene-level controls when the add-on is reloaded.
-        material["pribambase_material_schema"] = 2
+        material["pribambase_material_schema"] = 5
         projection.update_project_material(scene)
-        assert material.get("pribambase_material_schema") == 3
+        assert material.get("pribambase_material_schema") == 8
         master = next(
             node
             for node in material.node_tree.nodes
             if node.get("pribambase_role") == "master"
         )
-        assert master.node_tree.name == "PB_MasterShader_v3"
+        assert master.node_tree.name == "PB_MasterShader_v4"
         assert master.inputs["Emission Strength"].default_value == 3.5
+
+        detail = importlib.import_module(f"{ADDON_MODULE_NAME}.detail")
+        source = detail.initialize_source(scene)
+        geometry_reference = detail.geometry_normal_image(scene)
+        assert geometry_reference is not None
+        assert detail.dirty_frames() == (1,)
+        assert tuple(source.size) == (
+            canvas.width * detail.EDIT_SCALE,
+            canvas.height * detail.EDIT_SCALE,
+        )
+        assert source.colorspace_settings.name == "Non-Color"
+        assert tuple(geometry_reference.size) == (canvas.width, canvas.height)
+        assert geometry_reference.colorspace_settings.name == "Non-Color"
+        assert geometry_reference.get("pribambase_edit_scale") == 1
+        geometry_reference_pixels = tuple(geometry_reference.pixels[:])
+        assert max(geometry_reference_pixels[3::4]) > 0.5
+        origin_pixel = detail._source_pixel_at_location(scene, source, Vector((0.0, 0.0, 0.0)))
+        assert origin_pixel is not None
+        state.detail_pixel_scope = 'EDIT'
+        x0, x1, y0, y1 = detail._pixel_scope_bounds(scene, source, *origin_pixel)
+        assert (x1 - x0, y1 - y0) == (1, 1)
+        state.detail_pixel_scope = 'OUTPUT'
+        x0, x1, y0, y1 = detail._pixel_scope_bounds(scene, source, *origin_pixel)
+        assert (x1 - x0, y1 - y0) == (detail.EDIT_SCALE, detail.EDIT_SCALE)
+        state.detail_set_size = 3
+        x0, x1, y0, y1 = detail._set_brush_bounds(
+            scene,
+            source,
+            *origin_pixel,
+            state.detail_set_size,
+        )
+        assert (x1 - x0, y1 - y0) == (3 * detail.EDIT_SCALE, 3 * detail.EDIT_SCALE)
+        state.detail_pixel_scope = 'EDIT'
+        x0, x1, y0, y1 = detail._set_brush_bounds(
+            scene,
+            source,
+            *origin_pixel,
+            state.detail_set_size,
+        )
+        assert (x1 - x0, y1 - y0) == (3, 3)
+        state.detail_pixel_scope = 'OUTPUT'
+        state.detail_set_size = 1
+        assert detail._step_set_size(state, -1)
+        assert state.detail_pixel_scope == 'EDIT'
+        assert state.detail_set_size == 1
+        assert detail._step_set_size(state, 1)
+        assert state.detail_pixel_scope == 'OUTPUT'
+        assert state.detail_set_size == 1
+
+        source_pixels = list(source.pixels[:])
+        edited_output = None
+        for output_y in range(canvas.height):
+            for output_x in range(canvas.width):
+                offsets = [
+                    (
+                        ((output_y * detail.EDIT_SCALE + sub_y) * source.size[0]
+                        + output_x * detail.EDIT_SCALE + sub_x)
+                        * 4
+                    )
+                    for sub_y in range(detail.EDIT_SCALE)
+                    for sub_x in range(detail.EDIT_SCALE)
+                ]
+                if all(source_pixels[offset + 3] > 0.5 for offset in offsets):
+                    edited_output = (output_x, output_y, offsets)
+                    break
+            if edited_output is not None:
+                break
+        assert edited_output is not None, "Normal source has no fully covered 2×2 output pixel"
+        for index, offset in enumerate(edited_output[2]):
+            source_pixels[offset : offset + 3] = (
+                (1.0, 0.5, 0.5) if index < 2 else (0.5, 0.5, 1.0)
+            )
+        source.pixels.foreach_set(source_pixels)
+        source.update()
+        generated = detail.generate_normal(scene, send=False)
+        assert tuple(geometry_reference.pixels[:]) == geometry_reference_pixels
+        assert detail.dirty_frames() == ()
+        assert tuple(generated.size) == (canvas.width, canvas.height)
+        assert generated.colorspace_settings.name == "Non-Color"
+        assert generated.get("pribambase_detail_valid")
+        assert max(generated.pixels[3::4]) > 0.5
+        generated_pixels = tuple(generated.pixels[:])
+        covered_normals = []
+        for offset in range(0, len(generated_pixels), 4):
+            if generated_pixels[offset + 3] <= 0.5:
+                continue
+            vector = tuple(generated_pixels[offset + axis] * 2.0 - 1.0 for axis in range(3))
+            assert math.isclose(
+                math.sqrt(sum(component * component for component in vector)),
+                1.0,
+                # The delivered base-resolution image is intentionally 8-bit,
+                # so decoded unit vectors carry normal RGB quantization error.
+                abs_tol=1.5e-2,
+            )
+            covered_normals.append(tuple(round(component, 2) for component in vector))
+        assert len(set(covered_normals)) > 1, "World Normal output lost the cube's surface directions"
+        output_offset = (edited_output[1] * canvas.width + edited_output[0]) * 4
+        mixed = tuple(generated_pixels[output_offset + axis] * 2.0 - 1.0 for axis in range(3))
+        assert math.isclose(mixed[0], math.sqrt(0.5), abs_tol=0.02)
+        assert abs(mixed[1]) < 0.02
+        assert math.isclose(mixed[2], math.sqrt(0.5), abs_tol=0.02)
+        projection.update_project_material(scene)
+        normal_texture = next(
+            node
+            for node in material.node_tree.nodes
+            if node.get("pribambase_role") == "world-normal"
+        )
+        normal_map = next(
+            node
+            for node in material.node_tree.nodes
+            if node.get("pribambase_role") == "world-normal-map"
+        )
+        assert normal_texture.image == generated
+        assert normal_texture.interpolation == "Closest"
+        assert normal_map.space == "WORLD"
+        assert normal_map.inputs['Strength'].default_value == 1.0
+        output_nodes = {
+            node.get("pribambase_role"): node
+            for node in material.node_tree.nodes
+            if node.type == 'OUTPUT_MATERIAL'
+        }
+        state.detail_preview_mode = 'NORMAL_EDIT'
+        assert all(
+            socket.links[0].from_node.get("pribambase_role") == "normal-edit-preview-shader"
+            for node in output_nodes.values()
+            for socket in (node.inputs['Surface'],)
+        )
+        with projection.guide_material_context(scene):
+            assert all(
+                socket.links[0].from_node.get("pribambase_role") == "master"
+                for node in output_nodes.values()
+                for socket in (node.inputs['Surface'],)
+            )
+        assert all(
+            socket.links[0].from_node.get("pribambase_role") == "normal-edit-preview-shader"
+            for node in output_nodes.values()
+            for socket in (node.inputs['Surface'],)
+        )
+        edit_preview = next(
+            node
+            for node in material.node_tree.nodes
+            if node.get("pribambase_role") == "normal-edit-preview"
+        )
+        assert edit_preview.image == source
+        assert edit_preview.interpolation == "Closest"
+        state.detail_preview_mode = 'GEOMETRY_NORMAL'
+        assert all(
+            socket.links[0].from_node.get("pribambase_role")
+            == "geometry-normal-preview-shader"
+            for node in output_nodes.values()
+            for socket in (node.inputs['Surface'],)
+        )
+        geometry_preview = next(
+            node
+            for node in material.node_tree.nodes
+            if node.get("pribambase_role") == "geometry-normal-preview"
+        )
+        assert geometry_preview.image == geometry_reference
+        assert geometry_preview.interpolation == "Closest"
+        state.detail_preview_mode = 'FINAL_NORMAL'
+        assert all(
+            socket.links[0].from_node.get("pribambase_role")
+            == "final-normal-preview-shader"
+            for node in output_nodes.values()
+            for socket in (node.inputs['Surface'],)
+        )
+        final_preview_shader = next(
+            node
+            for node in material.node_tree.nodes
+            if node.get("pribambase_role") == "final-normal-preview-shader"
+        )
+        assert final_preview_shader.inputs['Color'].links[0].from_node == normal_texture
+        state.detail_preview_mode = 'MATERIAL'
+        assert all(
+            socket.links[0].from_node.get("pribambase_role") == "master"
+            for node in output_nodes.values()
+            for socket in (node.inputs['Surface'],)
+        )
+        state.apply_generated_normal = False
+        assert normal_map.inputs['Strength'].default_value == 0.0
+        state.apply_generated_normal = True
+        assert normal_map.inputs['Strength'].default_value == 1.0
+
+        flat = np.zeros((1, 3, 3), dtype=np.float32)
+        flat[..., 2] = 1.0
+        offset_x = np.asarray(((-1.0, 0.0, 1.0),), dtype=np.float32)
+        offset_y = np.zeros((1, 3), dtype=np.float32)
+        bulge = detail._radial_sculpt_vectors(
+            flat,
+            offset_x,
+            offset_y,
+            2.0,
+            bulge=True,
+        )
+        dent = detail._radial_sculpt_vectors(
+            flat,
+            offset_x,
+            offset_y,
+            2.0,
+            bulge=False,
+        )
+        assert bulge[0, 0, 0] < 0.0 < bulge[0, 2, 0]
+        assert dent[0, 0, 0] > 0.0 > dent[0, 2, 0]
+        assert tuple(bulge[0, 1]) == (0.0, 0.0, 1.0)
+        assert np.allclose(np.linalg.norm(bulge, axis=2), 1.0)
+
+        scene.frame_set(2)
+        assert detail.source_image(scene) is None, "Normal Edit must be explicit per animation frame"
+        scene.frame_set(1)
+        try:
+            detail.generate_normal(scene, scene.frame_end + 1, send=False)
+        except RuntimeError as error:
+            assert "outside the animation range" in str(error)
+        else:
+            raise AssertionError("An out-of-range World Normal request was accepted")
 
         preferences_entry.preferences.skip_modal = True
         image_name = image.name.encode("utf-8")
