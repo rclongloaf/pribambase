@@ -11,18 +11,21 @@ local Guide = dofile(app.fs.joinPath(
     "pribambase",
     "Guide.lua"
 ))
+local Normals = dofile(app.fs.joinPath(app.fs.userConfigPath,
+    "extensions", "pribambase", "Normals.lua"))
 if pribambase_channels_dlg then
     pribambase_channels_dlg:show{wait=false}
     return
 end
 
-local labels = {"Base Color", "Ambient Occlusion", "Roughness", "Metallic", "Emission"}
+local labels = {"Base Color", "Ambient Occlusion", "Roughness", "Metallic", "Emission", "World Normal"}
 local ids = {
     ["Base Color"]="base_color",
     ["Ambient Occlusion"]="ao",
     ["Roughness"]="roughness",
     ["Metallic"]="metallic",
-    ["Emission"]="emission"
+    ["Emission"]="emission",
+    ["World Normal"]="normal"
 }
 local settings = pribambase_settings
 local initialChannel = settings and settings.channelEditorChannel or "Base Color"
@@ -133,7 +136,7 @@ local function updateVisibilityControls()
     local sprite = app.activeSprite
     local base = sprite and Channels.group(sprite, "base_color") or nil
     local guide = Guide.findRenderLayer(sprite)
-    local normal = Guide.findWorldNormalLayer(sprite)
+    local normal = Normals.defaultLayer(sprite)
     updatingVisibility = true
     dlg:modify{
         id="base_visible",
@@ -153,6 +156,8 @@ local function updateVisibilityControls()
     local frame = app.activeFrame and app.activeFrame.frameNumber or 1
     local guideCel = guide and guide:cel(frame) or nil
     local normalCel = normal and normal:cel(frame) or nil
+    local smooth = Normals.defaultLayer(sprite, "SMOOTH")
+    local smoothCel = smooth and smooth:cel(frame) or nil
     dlg:modify{
         id="render_status",
         text=guideCel and string.format("Frame %d · %d×%d", frame, guideCel.image.width, guideCel.image.height)
@@ -160,8 +165,9 @@ local function updateVisibilityControls()
     }
     dlg:modify{
         id="normal_status",
-        text=normalCel and string.format("Frame %d · %d×%d · read-only", frame, normalCel.image.width, normalCel.image.height)
-            or "Waiting for Blender normal output"
+        text=normalCel and string.format("Frame %d · Flat %s / Smooth %s · read-only",
+            frame, normalCel and "ready" or "waiting", smoothCel and "ready" or "waiting")
+            or "Waiting for polygon normals from Blender"
     }
     updatingVisibility = false
 end
@@ -189,10 +195,10 @@ end
 local function setNormalVisibility()
     if updatingVisibility then return end
     local sprite = app.activeSprite
-    local normal = Guide.findWorldNormalLayer(sprite)
+    local normal = Normals.defaultLayer(sprite)
     if normal ~= nil then
         normal.isVisible = dlg.data.normal_visible
-        if normal.isVisible then normal.stackIndex = #sprite.layers end
+        if normal.isVisible then normal.stackIndex = 1 end
     end
     app.refresh()
     updateVisibilityControls()
@@ -202,7 +208,7 @@ end
 local function requestWorldNormal()
     local frame = app.activeFrame and app.activeFrame.frameNumber or 1
     if not pribambase_normal_request or not pribambase_normal_request(frame) then
-        app.alert{title="Pribambase", text="Start Sync before requesting World Normal."}
+        app.alert{title="Pribambase", text="Start Sync before requesting Geometry Normal."}
     end
 end
 
@@ -248,7 +254,8 @@ local sendControls = {
     {id="send_ao", channel="ao"},
     {id="send_roughness", channel="roughness"},
     {id="send_metallic", channel="metallic"},
-    {id="send_emission", channel="emission"}
+    {id="send_emission", channel="emission"},
+    {id="send_normal", channel="normal"}
 }
 
 
@@ -306,6 +313,9 @@ end
 
 
 local function updatePresets()
+    local editingNormal = selectedId() == "normal"
+    dlg:modify{id="value", enabled=not editingNormal}
+    dlg:modify{id="normal_picker", visible=editingNormal}
     local item = Channels.definition(selectedId())
     for index=1,4 do
         local preset = item and item.presets[index] or nil
@@ -343,8 +353,8 @@ end
 
 local function addPaintLayer()
     local channel = selectedId()
-    if Channels.definition(channel) == nil then
-        app.alert{title="Pribambase", text="Paint layers are available for scalar material channels."}
+    if channel ~= "normal" and Channels.definition(channel) == nil then
+        app.alert{title="Pribambase", text="Select a material or World Normal channel first."}
         return
     end
     mutate("Add Pribambase paint layer", function()
@@ -364,6 +374,8 @@ end
 dlg:combobox{id="channel", label="Channel", options=labels, option=initialChannel, onchange=activate}
 
 dlg:tab{id="paint_tab", text="Paint"}
+dlg:button{id="normal_picker", text="Open Normal Picker / Compare Pixel", visible=false,
+    onclick=function() app.command.SbNormalPicker() end}
 dlg:slider{
     id="value",
     label="Brush value",
@@ -416,6 +428,9 @@ end}
 dlg:check{id="send_emission", label="Emission", selected=true, onclick=function()
     setSendEnabled("send_emission", "emission")
 end}
+dlg:check{id="send_normal", label="World Normal", selected=true, onclick=function()
+    setSendEnabled("send_normal", "normal")
+end}
 dlg:separator{text="Channel Overlay"}
 dlg:slider{
     id="overlay",
@@ -435,11 +450,12 @@ dlg:tab{id="generated_tab", text="Generated"}
 dlg:separator{text="Render Guide"}
 dlg:check{id="guide_visible", label="Show", selected=true, onclick=setGuideVisibility}
 dlg:label{id="render_status", label="Status", text="Waiting for Blender"}
-dlg:separator{text="World Normal"}
+dlg:separator{text="Geometry Normals · Flat + Smooth"}
 dlg:check{id="normal_visible", label="Show", selected=false, onclick=setNormalVisibility}
-dlg:label{id="normal_status", label="Status", text="Waiting for Blender normal output"}
+dlg:label{id="normal_status", label="Status", text="Waiting for polygon normals from Blender"}
 dlg:button{id="normal_rebuild", text="Request Rebuild", onclick=requestWorldNormal}
-dlg:label{text="Generated in Blender · read-only"}
+dlg:label{text="Both references from Blender · paint World Normal in Aseprite"}
+dlg:button{text="Compare Flat / Smooth in Normal Picker", onclick=function() app.command.SbNormalPicker() end}
 
 dlg:tab{id="actions_tab", text="Actions"}
 dlg:button{id="initialize", text="Initialize / Migrate", onclick=initialize}

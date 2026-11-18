@@ -68,7 +68,7 @@ def workspace_manifest(scene: bpy.types.Scene, manifest_path: Path) -> dict[str,
     blend = Path(bpy.data.filepath)
     state = scene.sb_state
     manifest = {
-        "schema_version": 4,
+        "schema_version": 5,
         "asset": asset_name(scene),
         "sources": {
             "blender": _relative_or_absolute(blend, manifest_path.parent),
@@ -111,12 +111,12 @@ def workspace_manifest(scene: bpy.types.Scene, manifest_path: Path) -> dict[str,
                 "origin_y": layout.origin_y,
             },
         }
-        manifest["surface_detail"] = {
-            "source": "world_normal",
-            "edit_scale": 2,
-            "apply_generated_normal": state.apply_generated_normal,
-            "auto_rebuild": state.detail_auto_rebuild,
-            "auto_send": state.detail_auto_send,
+        manifest["normals"] = {
+            "source": "aseprite",
+            "space": "world",
+            "references": ["polygon_geometry", "smooth_geometry"],
+            "untouched_pixels": "polygon_geometry",
+            "apply_world_normal": state.apply_world_normal,
         }
     return manifest
 
@@ -140,14 +140,14 @@ def write_manifest(scene: bpy.types.Scene) -> Path:
 
 def load_manifest(scene: bpy.types.Scene, manifest_path: Path) -> None:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("schema_version") not in {1, 2, 3, 4}:
+    if manifest.get("schema_version") not in {1, 2, 3, 4, 5}:
         raise RuntimeError("Unsupported Pribambase pair manifest version")
 
     sources = manifest.get("sources", {})
     animation = manifest.get("animation", {})
     sync = manifest.get("sync", {})
     projection_data = manifest.get("projection", {})
-    detail_data = manifest.get("surface_detail", {})
+    normal_data = manifest.get("normals", manifest.get("surface_detail", {}))
     sprite_value = str(sources.get("aseprite", ""))
     sprite_path = Path(sprite_value)
     if not sprite_path.is_absolute():
@@ -161,15 +161,9 @@ def load_manifest(scene: bpy.types.Scene, manifest_path: Path) -> None:
     state.auto_render_current = bool(sync.get("auto_render_current", True))
     state.auto_render_on_save = bool(sync.get("auto_render_on_save", False))
     state.follow_frame = bool(sync.get("follow_frame", True))
-    if isinstance(detail_data, dict):
-        state.apply_generated_normal = bool(
-            detail_data.get("apply_generated_normal", state.apply_generated_normal)
-        )
-        state.detail_auto_rebuild = bool(
-            detail_data.get("auto_rebuild", state.detail_auto_rebuild)
-        )
-        state.detail_auto_send = bool(detail_data.get("auto_send", state.detail_auto_send))
-
+    if isinstance(normal_data, dict):
+        state.apply_world_normal = bool(normal_data.get(
+            "apply_world_normal", normal_data.get("apply_generated_normal", True)))
     if isinstance(projection_data, dict) and projection_data:
         profile = str(projection_data.get("profile", ""))
         if profile != projection.PROFILE_NAME:
@@ -206,6 +200,16 @@ def load_manifest(scene: bpy.types.Scene, manifest_path: Path) -> None:
         scene.frame_start = int(animation["frame_start"])
     if "frame_end" in animation:
         scene.frame_end = int(animation["frame_end"])
+
+    from . import normals
+
+    normals.migrate_scene(scene)
+    if manifest.get("schema_version", 1) < 5:
+        # Explicit source-pair migration: replace the old brush format, then
+        # generate a fresh geometric reference. Edited legacy normals are discarded.
+        if projection.state_layout(scene) is not None:
+            normals.generate_default(scene, force=True)
+        write_manifest(scene)
 
 
 def _image_from_active_object(context) -> bpy.types.Image | None:
@@ -293,9 +297,9 @@ def recalculate_projection_layout(scene: bpy.types.Scene) -> tuple[projection.La
                 new_layout,
                 fill_color=(1.0, 128.0 / 255.0, 0.0, 0.0),
             )
-        from . import detail
+        from . import normals
 
-        detail.resize_detail_images(scene, old_layout, new_layout)
+        normals.resize_images(scene, old_layout, new_layout)
     projection.set_state_layout(scene, new_layout)
     projection.update_project_material(scene)
 
@@ -329,19 +333,14 @@ def connection_messages(scene: bpy.types.Scene) -> list[bytearray]:
             messages.append(canvas)
     if scene.sb_state.follow_frame:
         messages.append(encode.frame(scene.frame_current))
-    from . import detail
+    from . import normals
 
-    generated = detail.normal_image(scene)
-    if generated is not None and source:
-        messages.append(
-            encode.generated_image(
-                size=(generated.size[0], generated.size[1]),
-                frame=scene.frame_current,
-                kind="world-normal",
-                sprite=source,
-                pixels=util.get_mirrored_pixels(generated),
-            )
-        )
+    if source and projection.state_layout(scene) is not None:
+        normals.generate_default(scene)
+        for mode in normals.REFERENCE_MODES:
+            message = normals.default_message(scene, mode=mode)
+            if message is not None:
+                messages.append(message)
     return messages
 
 
@@ -374,6 +373,9 @@ def send_projection(scene: bpy.types.Scene, frame: int | None = None) -> None:
     image = None
     try:
         ensure_projection_layout(scene)
+        from . import normals
+
+        normals.generate_default(scene, send=True)
         with projection.guide_material_context(scene):
             with projection.projection_render_context(scene):
                 image = get_render_image()
@@ -404,13 +406,13 @@ def last_error() -> str:
 
 
 def is_rendering() -> bool:
-    from . import detail
+    from . import normals
 
     return (
         _rendering
         or _batch_restore_frame is not None
         or projection.is_scanning()
-        or detail.is_generating()
+        or normals.is_generating()
     )
 
 
@@ -426,13 +428,6 @@ def _auto_render_timer():
     ):
         return None
     try:
-        from . import detail
-
-        if (
-            scene.sb_state.detail_auto_rebuild
-            and scene.frame_current in detail.dirty_frames()
-        ):
-            detail.generate_normal(scene)
         send_projection(scene)
     except Exception as error:
         bpy.ops.pribambase.report(message_type='ERROR', message=f"Auto projection failed: {error}")
@@ -496,9 +491,9 @@ def on_depsgraph_update(scene: bpy.types.Scene, depsgraph) -> None:
     bounds_changed = _projection_bounds_changed(scene, updates)
     if bounds_changed:
         scene.sb_state.projection_bounds_dirty = True
-        from . import detail
+        from . import normals
 
-        detail.mark_geometry_dirty(scene)
+        normals.mark_geometry_dirty(scene, all_frames=True)
     # The scene camera is only a viewing aid. Guides always use the canonical
     # global projection camera, so moving the user's camera is intentionally ignored.
     if render_changed and addon.server_up:
@@ -506,11 +501,27 @@ def on_depsgraph_update(scene: bpy.types.Scene, depsgraph) -> None:
 
 
 def on_frame_change(scene: bpy.types.Scene) -> None:
-    projection.update_project_material(scene)
-    if is_rendering() or _applying_remote_frame or not addon.connected:
+    if is_rendering():
         return
-    if scene.sb_state.follow_frame:
+    projection.update_project_material(scene)
+    if not addon.connected:
+        return
+    if scene.sb_state.follow_frame and not _applying_remote_frame:
         addon.server.send(encode.frame(scene.frame_current))
+    # Rendering from a frame-change handler can recurse into Blender's dependency
+    # graph. Schedule the reference bake on the main-thread timer instead.
+    if not bpy.app.timers.is_registered(_normal_frame_timer):
+        bpy.app.timers.register(_normal_frame_timer, first_interval=0.05)
+
+
+def _normal_frame_timer():
+    if addon.connected:
+        from . import normals
+        try:
+            normals.generate_default(bpy.context.scene, send=True)
+        except Exception as error:
+            print(f"Pribambase: geometry normal update failed: {error}")
+    return None
 
 
 def apply_remote_frame(frame: int) -> None:
@@ -587,7 +598,7 @@ def on_save(scene: bpy.types.Scene) -> None:
 
 def reset_runtime() -> None:
     global _rendering, _batch_restore_frame, _last_projection_frame, _last_error
-    for timer in (_auto_render_timer, _batch_render_timer):
+    for timer in (_auto_render_timer, _batch_render_timer, _normal_frame_timer):
         if bpy.app.timers.is_registered(timer):
             bpy.app.timers.unregister(timer)
     _dirty_frames.clear()
@@ -596,9 +607,9 @@ def reset_runtime() -> None:
     _batch_restore_frame = None
     _last_projection_frame = None
     _last_error = ""
-    from . import detail
+    from . import normals
 
-    detail.reset_runtime()
+    normals.reset_runtime()
 
 
 class SB_OT_sync_start(bpy.types.Operator):
@@ -624,6 +635,9 @@ class SB_OT_sync_start(bpy.types.Operator):
         ensure_image_pair(context)
         try:
             ensure_projection_layout(context.scene)
+            from . import normals
+
+            normals.generate_default(context.scene)
         except Exception as error:
             self.report({'ERROR'}, f"Could not calculate animation canvas: {error}")
             return {'CANCELLED'}

@@ -71,6 +71,13 @@ function init(plugin)
         onclick=run_script("ChannelEditor")
     }
 
+    plugin:newCommand{
+        id="SbNormalPicker",
+        title="Pribambase: Normal Picker",
+        group="file_export",
+        onclick=run_script("NormalEditor")
+    }
+
     if plugin.preferences.autostart or plugin.preferences.autoshow then
         pribambase_start = true
         local ok, what = pcall(run_script("Sync"))

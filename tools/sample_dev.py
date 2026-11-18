@@ -10,6 +10,7 @@ from pathlib import Path
 
 import aseprite_dev
 import blender_dev
+import pair_dev
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -72,7 +73,7 @@ def build_sample(blender: Path, aseprite: Path) -> int:
         raise blender_dev.DevError("Aseprite did not create roundtrip_texture.aseprite.")
 
     print(f"Generated Aseprite sample: {ASEPRITE_FILE}")
-    return 0
+    return pair_dev.migrate(PAIR_FILE)
 
 
 def test_sample(blender: Path, aseprite: Path) -> int:

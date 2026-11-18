@@ -105,7 +105,7 @@ class ChannelImage(Handler):
         source: str,
         data: np.array,
     ):
-        if channel != "orme":
+        if channel not in {"orme", "world-normal"}:
             print(f"Pribambase: unsupported material channel image {channel!r}")
             return
 
@@ -122,6 +122,13 @@ class ChannelImage(Handler):
                 return
 
         await wait_for_interface_unlock()
+        if frame < scene.frame_start or frame > scene.frame_end:
+            return
+        if channel == "world-normal":
+            from .. import normals
+
+            normals.receive_painted(scene, size[0], size[1], frame, data)
+            return
         image = projection.ensure_material_image(scene, size[0], size[1])
         util.update_image(size[0], size[1], image.name, data)
         scene.sb_state.material_frame = frame
@@ -198,7 +205,7 @@ class Frame(Handler):
         apply_remote_frame(frame)
 
 
-class DetailRequest(Handler):
+class NormalReferenceRequest(Handler):
     """Rebuild a Blender-owned generated texture requested by Aseprite."""
 
     id = 'R'
@@ -207,13 +214,13 @@ class DetailRequest(Handler):
         args.frame = self.take_uint(4)
 
     async def execute(self, *, frame):
-        from .. import detail
+        from .. import normals
 
         scene = bpy.context.scene
         try:
-            detail.generate_normal(scene, frame, send=True)
+            normals.generate_default(scene, frame, force=True, send=True)
         except Exception as error:
             bpy.ops.pribambase.report(
                 message_type='ERROR',
-                message=f"World Normal rebuild failed: {error}",
+                message=f"Geometry Normal rebuild failed: {error}",
             )

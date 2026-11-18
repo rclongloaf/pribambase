@@ -163,10 +163,9 @@ from .async_loop import *
 from .settings import *
 from .sync import *
 from .ui_3d import *
-from .detail import *
+from .normals import *
 from . import projection
-from . import detail
-from . import normal_picker
+from . import normals
 from . import workspace
 from .workspace import *
 from .util import *
@@ -178,7 +177,7 @@ bl_info = {
     "author": "lampysprites",
     "description": "Paint pixelart textures in Blender using Aseprite",
     "blender": (4, 0, 0),
-    "version": (2, 4, 0),
+    "version": (2, 5, 0),
     "location": "\"Pribambase\" panel in the 3D Viewport sidebar",
     "category": "Paint"
 }
@@ -201,13 +200,7 @@ classes = (
     SB_OT_projection_restore_camera,
     SB_OT_projection_view_camera,
     SB_OT_projection_setup_material,
-    SB_OT_detail_initialize,
-    SB_OT_detail_remove_source,
-    SB_OT_detail_rebuild,
-    SB_OT_detail_rebuild_dirty,
-    SB_OT_detail_pick_normal,
-    SB_OT_detail_free_pick_normal,
-    SB_OT_detail_paint,
+    SB_OT_normal_generate,
     SB_OT_texture_list,
     SB_PT_panel_link,
 
@@ -229,6 +222,10 @@ def register():
         subtype='FILE_PATH',
         options={'PATH_SUPPORTS_BLEND_RELATIVE'},
     )
+
+    for scene in bpy.data.scenes:
+        normals.migrate_scene(scene)
+    repair_project_material()
 
     # delay is just in case something else happens at startup
     # `persistent` protects the timer if the user loads a file before it fires
@@ -258,7 +255,6 @@ def unregister():
         bpy.app.handlers.save_post.remove(sb_on_save_post)
 
     workspace.reset_runtime()
-    normal_picker.stop_all()
 
     del bpy.types.Scene.sb_state
     del bpy.types.Image.sb_source
@@ -274,6 +270,9 @@ _images_hv = 0
 
 def repair_project_material():
     try:
+        for scene in bpy.data.scenes:
+            normals.migrate_scene(scene)
+            normals.mark_geometry_dirty(scene, all_frames=True)
         projection.update_project_material(bpy.context.scene)
     except Exception as error:
         print(f"Pribambase: could not upgrade project material: {error}")

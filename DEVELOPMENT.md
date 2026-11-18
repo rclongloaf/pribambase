@@ -167,3 +167,31 @@ Run **Sample - Run roundtrip**, then press **Start Sync** in Blender and choose
 Relevant Blender dependency-graph changes mark the current frame dirty and, when enabled, render
 the guide after the configured idle delay. Incoming image updates are excluded from that detector
 to prevent feedback loops.
+
+## Normal workflow and source migration
+
+Normal painting belongs to Aseprite in version 2.5. Blender's `normals.py` generates **both**
+Flat polygon and Smooth references at the shared canvas resolution, caches them per frame,
+and receives the artist's `world-normal` texture. `NormalEditor.lua` provides two camera-facing grids
+(Z → X and X → Z), with world-plane constraints, shared axes/diagonals and simultaneous Flat/Smooth
+pixel comparison. Both grids use the fixed `global_iso_v1` render basis. Rear-facing brush colors
+are blocked on normal layers while the picker is open; existing/imported pixels remain inspectable.
+Changing the comparison view never changes the texture sent to Blender. Untouched paint pixels use
+the Flat geometry reference.
+
+Migrate a saved pair (close/save the source files first):
+
+```bash
+./dev.sh pair migrate examples/roundtrip/pribambase_roundtrip.pribambase.json
+```
+
+Windows equivalent: `.venv\Scripts\python.exe tools\pair_dev.py migrate <manifest>`.
+The migrator backs up `.blend`, `.aseprite`, and the manifest under `build/migrations/`, upgrades
+both native files, and generates Flat + Smooth for every animation frame. It intentionally discards
+legacy Blender normal edits. Other artist channels are retained; a failure restores all originals.
+Manifest schema is 5, Aseprite channel schema is 7, project material schema is 9.
+
+`./dev.sh all` checks polygon/smooth bakes, world RGB transport, per-frame shader binding,
+migration idempotence, reference refresh/undo safety, camera-facing grids, exact reference sampling,
+hemisphere guards and save/reopen persistence.
+`./dev.sh sample test` additionally validates both references on every migrated sample frame.

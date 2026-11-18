@@ -23,6 +23,14 @@ for _,channel in ipairs({"ao", "roughness", "metallic", "emission"}) do
         "Sample channel backing has the wrong default: " .. channel
     )
 end
+local Normals = dofile(app.fs.joinPath(app.fs.filePath(channelsPath), "Normals.lua"))
+assert(Channels.group(sprite,"normal") ~= nil)
+assert(not Channels.needsMigration(sprite))
+for _,mode in ipairs({"FLAT", "SMOOTH"}) do
+    local reference = Normals.defaultLayer(sprite, mode)
+    assert(reference and reference.isReference and not reference.isEditable)
+    for frame=1,#sprite.frames do assert(reference:cel(frame) ~= nil) end
+end
 local packed = Channels.packORME(sprite, 1)
 local pixel = packed:getPixel(0, 0)
 assert(app.pixelColor.rgbaR(pixel) == 255, "Sample AO default is invalid")

@@ -16,7 +16,10 @@ local files = {
     "Guide.lua",
     "PayloadCache.lua",
     "Settings.lua",
-    "Sync.lua"
+    "Sync.lua",
+    "NormalMath.lua",
+    "Normals.lua",
+    "NormalEditor.lua"
 }
 
 for _, name in ipairs(files) do
@@ -84,30 +87,6 @@ assert(
     app.pixelColor.rgbaR(referenceLayer:cel(1).image:getPixel(0, 0)) == 12,
     "Undo unexpectedly reverted non-undoable external render-guide pixels"
 )
-app.command.NewLayer{reference=true}
-local normalLayer = app.activeLayer
-normalLayer.name = "Pribambase World Normal"
-normalLayer.isEditable = false
-normalLayer.isVisible = false
-Guide.markWorldNormalLayer(normalLayer)
-assert(Guide.isWorldNormalLayer(normalLayer), "World Normal generated role was not stored")
-assert(
-    Guide.findWorldNormalLayer(apiSprite) == normalLayer,
-    "World Normal generated layer metadata cannot be resolved"
-)
-assert(
-    Guide.findRenderLayer(apiSprite) == referenceLayer,
-    "Adding World Normal confused render-guide layer discovery"
-)
-local normalPixels = Image(2, 2, ColorMode.RGB)
-normalPixels:clear(app.pixelColor.rgba(128, 64, 255, 255))
-local normalCel = Guide.ensureCel(apiSprite, normalLayer, 1, normalPixels)
-Guide.updateCelPixels(normalCel, normalPixels)
-assert(
-    app.pixelColor.rgbaB(normalCel.image:getPixel(0, 0)) == 255,
-    "World Normal generated pixels were not refreshed"
-)
-
 local canvasSprite = Sprite(2, 2, ColorMode.RGB)
 app.activeSprite = canvasSprite
 canvasSprite.cels[1].image:drawPixel(0, 0, app.pixelColor.rgba(255, 0, 0, 255))
@@ -182,7 +161,7 @@ channelSprite.cels[1].image:drawPixel(1, 0, app.pixelColor.rgba(230, 20, 10, 255
 local _root, created = Channels.initialize(channelSprite)
 assert(created, "Material channel structure was not created")
 assert(Channels.hasStructure(channelSprite), "Material channel metadata is missing")
-assert(Channels.group(channelSprite, "normal") == nil, "World Normal must not be an editable channel")
+assert(Channels.group(channelSprite, "normal") ~= nil, "World Normal must be an editable channel")
 for _,channel in ipairs({"ao", "roughness", "metallic", "emission"}) do
     assert(
         Channels.previewOpacity(channelSprite, channel) == 96,
@@ -412,6 +391,9 @@ assert(
     "Disabled AO did not survive saving and reopening the sprite"
 )
 reopenedPersistence:close()
+
+dofile(app.fs.joinPath(app.fs.filePath(app.params["test"]), "normal_test.lua"))
+dofile(app.fs.joinPath(app.fs.filePath(app.params["test"]), "normal_editor_test.lua"))
 
 local marker, openError = io.open(result, "w")
 if marker == nil then

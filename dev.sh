@@ -8,7 +8,7 @@ cd "$project_root"
 target="${1:-info}"
 if [[ $# -gt 0 ]]; then shift; fi
 case "$target" in
-    blender|aseprite|sample)
+    blender|aseprite|sample|pair)
         runner="$target"
         ;;
     setup|info|run|debug|test|unit|lint|all)
@@ -17,7 +17,7 @@ case "$target" in
         ;;
     *)
         echo "Usage: ./dev.sh {setup|info|run|debug|test|unit|lint|all}" >&2
-        echo "       ./dev.sh {blender|aseprite|sample} COMMAND [OPTIONS]" >&2
+        echo "       ./dev.sh {blender|aseprite|sample|pair} COMMAND [OPTIONS]" >&2
         exit 2
         ;;
 esac

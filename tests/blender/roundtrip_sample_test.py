@@ -64,16 +64,24 @@ def main() -> None:
 
         manifest_path = sample_root / "pribambase_roundtrip.pribambase.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        assert manifest["schema_version"] == 4
+        assert manifest["schema_version"] == 5
         assert manifest["asset"] == "Roundtrip Cube"
         assert manifest["sources"]["aseprite"] == "roundtrip_texture.aseprite"
         assert manifest["animation"]["fps"] == 12.0
-        detail_manifest = manifest["surface_detail"]
-        assert detail_manifest["source"] == "world_normal"
-        assert detail_manifest["edit_scale"] == 2
-        assert detail_manifest["apply_generated_normal"] is True
-        assert detail_manifest["auto_rebuild"] is True
-        assert detail_manifest["auto_send"] is True
+        assert "surface_detail" not in manifest
+        normal_manifest = manifest["normals"]
+        assert normal_manifest["source"] == "aseprite"
+        assert normal_manifest["space"] == "world"
+        assert normal_manifest["references"] == ["polygon_geometry", "smooth_geometry"]
+        assert normal_manifest["apply_world_normal"] is True
+        normals = importlib.import_module(f"{ADDON_MODULE_NAME}.normals")
+        assert state.normal_schema == normals.SCHEMA
+        for frame in range(bpy.context.scene.frame_start, bpy.context.scene.frame_end+1):
+            for mode in normals.REFERENCE_MODES:
+                reference = normals.default_image(bpy.context.scene, frame, mode)
+                assert reference is not None and tuple(reference.size) == (64,64)
+                assert reference.packed_file is not None
+        assert not any(image.get("pribambase_detail_role") for image in bpy.data.images)
         projection_manifest = manifest["projection"]
         assert projection_manifest["profile"] == "global_iso_v1"
         assert projection_manifest["pixels_per_unit"] == 20.0
@@ -102,7 +110,7 @@ def main() -> None:
         assert (canvas.origin_x, canvas.origin_y) == (32, 32)
         material = state.projection_material
         assert material is not None and material.get("pribambase_project_material")
-        assert material.get("pribambase_material_schema") == 8
+        assert material.get("pribambase_material_schema") == 9
         projection_nodes = [
             node
             for node in material.node_tree.nodes

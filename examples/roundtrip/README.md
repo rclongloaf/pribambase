@@ -61,39 +61,34 @@ The cube intentionally has no UV layer. `PB_Roundtrip_Cube_Projected` samples th
 fixed world coordinates, while **Restore Camera** only restores the matching inspection view.
 The shared animation canvas is stored in the pair manifest and applies to all 12 frames.
 
-## Blender direct World Normal editing
+## Aseprite World Normal editing
 
-1. In Blender open **Pribambase → World Normal Edit** on frame 1 and press **Initialize from Geometry**.
-2. Choose a target world direction, Radius/Strength, and press **Paint Normals**.
-3. Paint on the cube with LMB and finish with `Enter`; use `Q/E` or `1–5` to switch tools, Ctrl+wheel
-   for the active tool radius/size, Alt+wheel for strength, MMB/wheel to pan/zoom the camera view,
-   and Tab/Shift+Tab to cycle previews. Shift+1–4 directly select Edited/Final/Geometry/Material.
-   Ctrl+Z/Ctrl+Y undo and redo individual strokes; Enter, Esc, and RMB all
-   finish the mode while saving the current result.
-4. Keep **Apply Generated World Normal** enabled to see the result in the material and guide.
-5. In Aseprite open the **Generated** tab and enable **World Normal → Show**.
+1. Start Sync in both applications. Blender sends both **Flat** polygon normals and **Smooth**
+   normals for the active frame; both are already stored for all 12 frames in this migrated sample.
+2. In Aseprite open **File → Pribambase: Normal Picker** and click **Paint Normals** in the Canvas group.
+3. Choose Free or a 90° / 45° / 30° / 22.5° / 15° / 7.5° step. Both balls show the same camera-facing
+   hemisphere with different world rotation grids, **Z → X** and **X → Z**. World axes and diagonals
+   remain shared anchors; **Plane** constrains picking to XY, XZ or YZ. Paint using Aseprite's tools.
+4. Use **Inspect Pixel** or **Follow cursor**. Both balls show the cyan painted direction, amber Flat
+   diamond, purple Smooth triangle and white brush cross simultaneously. The inspector displays all
+   three XYZ directions and both angular differences. **Use Painted / Use Flat / Use Smooth** sample
+   exact RGB without snapping; hidden directions are diagnosed and cannot be copied into the brush.
+5. **View Flat / View Smooth** preview either reference; **Paint Normals** returns to painting.
+   Preview never changes the artist's outbound texture. **Options** reveals camera-relative numeric
+   angles, overlay switches and **Geometry → Rebuild Both References** for the current frame.
 
-The sample canvas is `64×64`, so Blender stores a `128×128` editable World Normal source and derives
-a `64×64` RGB output by averaging and renormalizing each 2×2 block. The source remains editable only
-in the `.blend`; the output arrives in Aseprite as a locked per-frame reference layer. Each animation
-frame is initialized separately so deformed geometry keeps its own sharp surface transitions.
+Transparent paint pixels retain the Flat geometric direction. Both references are locked,
+frame-exact, 64×64 RGB data maps. Rebuilding them preserves Aseprite paint. Blender's old 2×
+normal source, normal picker and sculpt brushes have been removed.
 
-Use **Material / Edited / Geometry / Final** to compare the regular shader, editable encoded RGB
-vectors, the immutable geometry bake, and the final 1× map used by the material. The eyedropper and
-`Alt+LMB` sample the visible Edited, Geometry, or Final map. **Bulge** and **Dent** create projected
-bumps and cavities directly in the
-normal vectors; Paint, Smooth, Bulge, and Dent remember separate Ctrl+wheel-adjustable radii. **Set Pixel**
-writes an exact normalized direction with its own Ctrl+wheel-adjustable square Size. Its unit is either a
-final Output Pixel (expanded to 2×2 edit samples) or an individual Edit Sample.
-Decreasing below Output Size 1 automatically selects the smallest Edit Sample 1×1 step; increasing
-crosses back through Output Size 1 before Size 2.
+The checked-in sources were upgraded with a migration, preserving the original geometry,
+animation, Base Color and scalar channels:
 
-Press `N` while painting, or use the gizmo button next to the eyedropper, to open the viewport Normal
-Ball. It shows global XYZ axes plus selected/current arrows on the model. Continuous mode accepts any
-camera-facing unit direction. Quantized mode subdivides every 90° great-circle arc between signed
-global axes: `1/2 = 45°`, `1/3 = 30°`, `1/4 = 22.5°` by default, through `1/12 = 7.5°`.
-Interior directions are generated symmetrically without Euler rotation order. Use `Q` for mode, the
-wheel for the division count, and LMB/Enter to accept.
+```bash
+./dev.sh pair migrate examples/roundtrip/pribambase_roundtrip.pribambase.json
+```
+
+The migrator backs up all three sources under `build/migrations/` and restores them on failure.
 
 ## Rebuild and validate
 

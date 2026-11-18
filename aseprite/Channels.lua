@@ -1,5 +1,7 @@
 -- Typed material-channel groups and deterministic ORME composition.
 local Channels = {}
+local moduleDirectory = app.fs.filePath(debug.getinfo(1, "S").source:sub(2))
+local Normals = dofile(app.fs.joinPath(moduleDirectory, "Normals.lua"))
 
 local pluginKey = "lampysprites/pribambase"
 local sendKeys = {
@@ -7,7 +9,8 @@ local sendKeys = {
     ao="sendAO",
     roughness="sendRoughness",
     metallic="sendMetallic",
-    emission="sendEmission"
+    emission="sendEmission",
+    normal="sendNormal"
 }
 
 Channels.baseColorDefault = 204
@@ -231,7 +234,7 @@ end
 
 function Channels.needsMigration(sprite)
     if not Channels.hasStructure(sprite) then return false end
-    return (tonumber(properties(sprite).channelSchema) or 1) < 6
+    return (tonumber(properties(sprite).channelSchema) or 1) < 7
 end
 
 
@@ -332,7 +335,9 @@ function Channels.initialize(sprite)
                 end
             end
         end
-        if spriteProperties.channelSchema ~= 6 then spriteProperties.channelSchema = 6 end
+        if schema < 7 then Normals.migrate(sprite) end
+        Normals.ensure(sprite, root)
+        if spriteProperties.channelSchema ~= 7 then spriteProperties.channelSchema = 7 end
         return root, false
     end
 
@@ -359,12 +364,14 @@ function Channels.initialize(sprite)
     end
 
     Channels.ensurePaintDefaults(sprite, true)
-    properties(sprite).channelSchema = 6
+    Normals.ensure(sprite, root)
+    properties(sprite).channelSchema = 7
     return root, true
 end
 
 
 function Channels.paintLayer(sprite, channel, createNew)
+    if channel == "normal" then return Normals.paintLayer(sprite, createNew) end
     local group = Channels.group(sprite, channel)
     if group == nil then return nil end
     if not createNew then
@@ -479,6 +486,13 @@ function Channels.packORME(sprite, frame)
 end
 
 
+function Channels.renderNormal(sprite, frame)
+    local reference = Normals.defaultLayer(sprite)
+    if reference == nil or reference:cel(frame) == nil then return nil end
+    return Normals.render(sprite, frame, not Channels.sendEnabled(sprite, "normal"))
+end
+
+
 function Channels.activate(sprite, channel, value)
     Channels.initialize(sprite)
     local root = find(sprite, "channels-root")
@@ -487,6 +501,36 @@ function Channels.activate(sprite, channel, value)
     local scalar = definition(channel)
 
     root.isVisible = true
+    local normal = Normals.group(sprite)
+    local reference = Normals.defaultLayer(sprite)
+    local editingNormal = channel == "normal"
+    if normal then normal.isVisible = editingNormal end
+    if reference then reference.isVisible = editingNormal end
+    local smoothReference = Normals.defaultLayer(sprite, "SMOOTH")
+    if smoothReference then smoothReference.isVisible = false end
+    -- Preserve the artist's view choices while switching to/from the data map.
+    local rootProperties = properties(root)
+    if editingNormal and not rootProperties.normalPreview then
+        rootProperties.normalBaseVisible = base.isVisible and 1 or 0
+        for _,layer in ipairs(sprite.layers) do
+            if layer.properties(pluginKey).role == "render-guide" then
+                properties(layer).normalPreviousVisible = layer.isVisible and 1 or 0
+                layer.isVisible = false
+            end
+        end
+        rootProperties.normalPreview = true
+        base.isVisible = false
+    elseif not editingNormal and rootProperties.normalPreview then
+        base.isVisible = rootProperties.normalBaseVisible ~= 0
+        for _,layer in ipairs(sprite.layers) do
+            local previous = properties(layer).normalPreviousVisible
+            if previous ~= nil then
+                layer.isVisible = previous ~= 0
+                properties(layer).normalPreviousVisible = nil
+            end
+        end
+        rootProperties.normalPreview = nil
+    end
     -- Scalar channels are translucent editing overlays. Base Color stays
     -- visible for context; group opacity is intentionally ignored by the
     -- deterministic channel compositor below.
@@ -495,7 +539,9 @@ function Channels.activate(sprite, channel, value)
         Channels.group(sprite, item.id).isVisible = scalar ~= nil and item.id == scalar.id
     end
 
-    if scalar ~= nil then
+    if editingNormal then
+        app.activeLayer = Normals.paintLayer(sprite, false)
+    elseif scalar ~= nil then
         app.activeLayer = Channels.paintLayer(sprite, scalar.id, false)
         local gray = math.max(0, math.min(255, math.floor(value or scalar.default)))
         app.fgColor = Color{r=gray, g=gray, b=gray, a=255}

@@ -18,11 +18,6 @@ function Guide.markRenderLayer(layer)
 end
 
 
-function Guide.markWorldNormalLayer(layer)
-    return mark(layer, "world-normal-generated")
-end
-
-
 function Guide.placeAtBottom(layer)
     if layer ~= nil and layer.stackIndex ~= 1 then
         layer.stackIndex = 1
@@ -36,41 +31,6 @@ function Guide.isRenderLayer(layer)
     return layer ~= nil
         and layer.isReference
         and layer.properties(pluginKey).role == "render-guide"
-end
-
-
-function Guide.isWorldNormalLayer(layer)
-    return layer ~= nil
-        and layer.isReference
-        and layer.properties(pluginKey).role == "world-normal-generated"
-end
-
-
-local function findTypedLayer(sprite, role)
-    if sprite == nil then return nil end
-    for _,layer in ipairs(sprite.layers) do
-        if layer.isReference and layer.properties(pluginKey).role == role then
-            return layer
-        end
-    end
-    return nil
-end
-
-
-function Guide.findWorldNormalLayer(sprite)
-    local typed = findTypedLayer(sprite, "world-normal-generated")
-    if typed ~= nil then return typed end
-    if sprite == nil then return nil end
-    for _,layer in ipairs(sprite.layers) do
-        if layer.isReference and (
-            layer.name == "Pribambase World Normal"
-            or string.match(layer.name, "^Pribambase World Normal %(Generated%)") ~= nil
-        ) then
-            Guide.markWorldNormalLayer(layer)
-            return layer
-        end
-    end
-    return nil
 end
 
 
@@ -101,7 +61,7 @@ function Guide.findRenderLayer(sprite)
         end
     end
 
-    if referenceCount == 1 then
+    if referenceCount == 1 and onlyReference.properties(pluginKey).role == nil then
         Guide.markRenderLayer(onlyReference)
         Guide.placeAtBottom(onlyReference)
         return onlyReference

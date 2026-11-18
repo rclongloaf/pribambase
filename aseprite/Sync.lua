@@ -52,6 +52,8 @@ else
         "pribambase",
         "Channels.lua"
     ))
+    local Normals = dofile(app.fs.joinPath(app.fs.userConfigPath,
+        "extensions", "pribambase", "Normals.lua"))
     local PayloadCache = dofile(app.fs.joinPath(
         app.fs.userConfigPath,
         "extensions",
@@ -198,6 +200,13 @@ else
                     source=name
                 })
             end
+            local normal = Channels.renderNormal(sprite, frameNumber)
+            if normal and sentTexturePayloads:changed(
+                sprite.id, name, frameNumber, "normal", normal, new) then
+                ws:sendBinary(messageChannel{
+                    image=normal, frame=frameNumber, channel="world-normal", source=name
+                })
+            end
         else
             ws:sendBinary(messageImage{
                 sprite=sprite,
@@ -337,64 +346,6 @@ else
         end
 
         Guide.updateCelPixels(refCel, renderImage)
-        app.refresh()
-        if pribambase_generated_refresh then pribambase_generated_refresh() end
-    end
-
-
-    -- Blender owns this texture. It is stored as a locked reference cel and
-    -- refreshed through Image.bytes so generated updates never enter Undo.
-    local function show_world_normal(w, h, frameNumber, data)
-        if spr == nil then return end
-        if spr.colorMode ~= ColorMode.RGB then
-            error("Generated World Normal requires an RGB sprite")
-        end
-        while #spr.frames < frameNumber do spr:newEmptyFrame() end
-        local frameObject = spr.frames[frameNumber]
-        local layer = Guide.findWorldNormalLayer(spr)
-        local cel = layer and layer:cel(frameObject) or nil
-        local image = Image(w, h, ColorMode.RGB)
-        image.bytes = data
-        if w ~= spr.width or h ~= spr.height then image:resize(spr.width, spr.height) end
-
-        local needsSetup = layer == nil
-            or cel == nil
-            or not Guide.imageMatches(cel, image)
-            or not Guide.isWorldNormalLayer(layer)
-            or layer.isEditable
-            or cel.position.x ~= 0
-            or cel.position.y ~= 0
-
-        if needsSetup then
-            app.transaction("Prepare Pribambase World Normal", function()
-                if layer == nil then
-                    local name = "Pribambase World Normal"
-                    for _,candidate in ipairs(spr.layers) do
-                        if candidate.name == name and not candidate.isReference then
-                            name = name .. " (Generated)"
-                            break
-                        end
-                    end
-                    local active = app.activeLayer
-                    app.command.NewLayer{reference=true}
-                    layer = app.activeLayer
-                    layer.name = name
-                    layer.opacity = 255
-                    layer.isVisible = false
-                    app.activeLayer = active
-                end
-                cel = Guide.ensureCel(spr, layer, frameObject, image)
-                if not Guide.imageMatches(cel, image) then cel.image = image end
-                Guide.markWorldNormalLayer(layer)
-                if cel.position.x ~= 0 or cel.position.y ~= 0 then
-                    cel.position = Point(0, 0)
-                end
-                if layer.isEditable then layer.isEditable = false end
-            end)
-        end
-
-        Guide.updateCelPixels(cel, image)
-        layer.properties("lampysprites/pribambase").lastFrame = frameNumber
         app.refresh()
         if pribambase_generated_refresh then pribambase_generated_refresh() end
     end
@@ -554,7 +505,7 @@ else
     local function handleGeneratedImage(msg)
         local _id, w, h, frameNumber, kind, source, pixels =
             string.unpack("<BHHI4s4s4s4", msg)
-        if kind ~= "world-normal" then return end
+        if kind ~= "geometry-normal-flat" and kind ~= "geometry-normal-smooth" then return end
 
         if source ~= "" then
             local found = false
@@ -575,10 +526,24 @@ else
 
         pause_app_change = true
         local ok, errorMessage = pcall(function()
-            show_world_normal(w, h, frameNumber, pixels)
+            if not Channels.hasStructure(spr) or Channels.needsMigration(spr) then
+                app.transaction("Migrate Pribambase normal channel", function()
+                    Channels.initialize(spr)
+                end)
+            end
+            local image = Image(w, h, ColorMode.RGB)
+            image.bytes = pixels
+            Normals.receiveDefault(spr, frameNumber, image,
+                kind == "geometry-normal-smooth" and "SMOOTH" or "FLAT")
         end)
         pause_app_change = false
         if not ok then error(errorMessage) end
+        -- The default is part of the composed artist normal, so send exactly
+        -- this frame after the external update, without a guide-feedback loop.
+        sendSpriteFrame(spr, outboundSpriteName(spr), frameNumber, false)
+        app.refresh()
+        if pribambase_generated_refresh then pribambase_generated_refresh() end
+        if pribambase_normal_refresh then pribambase_normal_refresh() end
     end
 
 
