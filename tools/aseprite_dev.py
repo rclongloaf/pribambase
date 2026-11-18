@@ -265,7 +265,15 @@ def test_extension(aseprite: Path) -> int:
 
 def aseprite_is_running(executable: Path) -> bool:
     if sys.platform != "win32":
-        return False
+        pgrep = shutil.which("pgrep")
+        if pgrep is None:
+            return False
+        return subprocess.run(
+            [pgrep, "-x", executable.name],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode == 0
     result = subprocess.run(
         ["tasklist", "/FI", f"IMAGENAME eq {executable.name}", "/FO", "CSV", "/NH"],
         check=False,

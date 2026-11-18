@@ -4,6 +4,55 @@ This repository includes repeatable Blender 5.2, Aseprite, and PyCharm workflows
 add-on is loaded directly from `blender/`, while the Aseprite extension from `aseprite/` is packaged and
 installed automatically before launch.
 
+## macOS / WebStorm
+
+Use the native Apple Silicon builds of Blender **5.2 LTS**, Aseprite, and WebStorm.
+Blender and WebStorm can be installed with Homebrew:
+
+```bash
+brew install --cask blender@lts webstorm
+```
+
+Install the full version of Aseprite as `/Applications/Aseprite.app`; a local build from the
+official sources works too. The trial version does not support the complete development workflow.
+The runners detect both applications automatically. For custom locations, set
+`BLENDER_EXECUTABLE` and `ASEPRITE_EXECUTABLE` in the ignored `.env` file.
+
+Open this repository in WebStorm and select **macOS - Setup environment** from the run menu
+once, or run `./dev.sh setup` in Terminal. This creates `.venv` with Blender's own Python and
+installs the dependencies. The shared **macOS - …** run configurations use WebStorm's bundled
+Shell Script support, so they do not require a Python IDE plugin.
+
+- **macOS - Aseprite - Run extension** builds and installs the current extension into
+  `~/Library/Application Support/Aseprite/extensions/pribambase`, then opens Aseprite.
+- **macOS - Aseprite - Install extension** updates the managed extension without opening the app.
+- **macOS - Blender - Run add-on** opens Blender and registers the current `blender/` source
+  directly. This development session uses temporary add-on preferences. After editing Python,
+  use `F3 → Reload Pribambase (Dev)` or restart this configuration.
+- **macOS - Sample - Run roundtrip** installs the Aseprite extension and opens both applications
+  with the included sample. Enable sync in each app as described below.
+- **macOS - Quality - All** runs Ruff, unit tests, and both application smoke tests.
+
+Close previous Aseprite development windows before launching again so the new instance loads
+the updated extension. The runner never closes an existing application or discards unsaved work.
+
+Equivalent terminal commands:
+
+```bash
+./dev.sh info
+./dev.sh aseprite info
+./dev.sh aseprite install
+./dev.sh aseprite run
+./dev.sh blender run
+./dev.sh sample run
+./dev.sh sample test
+./dev.sh all
+```
+
+The existing configurations without the **macOS -** prefix remain available for PyCharm users.
+WebStorm's Shell Script configurations support launching and tests; Python breakpoint debugging
+still uses a Python-capable IDE and the existing DAP workflow below.
+
 ## First-time setup on Windows
 
 1. Install Blender 5.2.

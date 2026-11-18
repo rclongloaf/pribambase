@@ -182,19 +182,21 @@ def setup(blender: Path) -> int:
             return code
 
     print("\nDevelopment environment is ready.")
-    print(f"PyCharm interpreter: {python}")
-    print("Next: run .\\dev.ps1 all")
+    print(f"Development Python: {python}")
+    print("Next: run .\\dev.ps1 all" if sys.platform == "win32" else "Next: run ./dev.sh all")
     return 0
 
 
 def require_venv() -> Path:
     python = venv_python()
     if not python_is_usable(python):
-        raise DevError("The development environment is missing. Run .\\dev.ps1 setup first.")
+        command = ".\\dev.ps1 setup" if sys.platform == "win32" else "./dev.sh setup"
+        raise DevError(f"The development environment is missing. Run {command} first.")
     try:
         capture([str(python), "-c", "import aiohttp"])
     except DevError as exc:
-        raise DevError("Development dependencies are incomplete. Run .\\dev.ps1 setup.") from exc
+        command = ".\\dev.ps1 setup" if sys.platform == "win32" else "./dev.sh setup"
+        raise DevError(f"Development dependencies are incomplete. Run {command}.") from exc
     return python
 
 
@@ -257,7 +259,7 @@ def show_info(blender: Path) -> int:
     version = capture([str(blender), "--version"]).splitlines()[0]
     print(f"Version: {version}")
     python = venv_python()
-    print(f"PyCharm interpreter: {python}")
+    print(f"Development Python: {python}")
     print(f"Environment ready: {'yes' if python_is_usable(python) else 'no'}")
     return 0
 
