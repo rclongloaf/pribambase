@@ -25,6 +25,7 @@ from .addon import addon
 from . import workspace
 from . import projection
 from . import normals
+from . import pack_export
 import numpy as np
 
 
@@ -75,6 +76,17 @@ class SB_PT_panel_link(bpy.types.Panel):
             row.operator("pribambase.sync_start", text="Start Sync", icon="PLAY")
         row.operator("pribambase.preferences", icon='PREFERENCES', text="", emboss=False)
 
+        export = layout.column(align=True)
+        exporting = pack_export.is_exporting()
+        export.enabled = not exporting
+        export.operator_context = 'INVOKE_DEFAULT'
+        export.operator(
+            "pribambase.export_pack",
+            text="Exporting Pack…" if exporting else "Export Pack",
+            icon='EXPORT',
+        )
+        export.prop(state, "pack_output_directory")
+
         pair = layout.box()
         pair.label(text="Source Pair", icon='LINKED')
         pair.prop(state, "asset_name")
@@ -98,8 +110,9 @@ class SB_PT_panel_link(bpy.types.Panel):
 
         projected = layout.box()
         projected.label(text="Global Projection", icon='MOD_UVPROJECT')
+        density = projection.pixels_per_unit(context.scene) / projection.meters_per_unit(context.scene)
         projected.label(
-            text=f"Global Iso · {projection.PIXELS_PER_UNIT:g} pixels/unit",
+            text=f"Global Iso · {density:g} px/m",
             icon='WORLD',
         )
         projected.prop(state, "projection_collection")

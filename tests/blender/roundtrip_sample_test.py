@@ -123,7 +123,7 @@ def main() -> None:
         assert camera is not None and camera.data.type == "ORTHO"
         assert math.isclose(
             camera.data.ortho_scale,
-            64 / projection.PIXELS_PER_UNIT,
+            64 / projection.pixels_per_unit(bpy.context.scene),
             rel_tol=1e-6,
         )
 

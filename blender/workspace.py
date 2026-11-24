@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from pathlib import Path
@@ -92,7 +93,7 @@ def workspace_manifest(scene: bpy.types.Scene, manifest_path: Path) -> dict[str,
         material = state.projection_material
         manifest["projection"] = {
             "profile": projection.PROFILE_NAME,
-            "pixels_per_unit": projection.PIXELS_PER_UNIT,
+            "pixels_per_unit": projection.pixels_per_unit(scene),
             "collection": collection.name if collection is not None else "",
             "material": material.name if material is not None else "",
             "image": state.projection_image.name if state.projection_image is not None else "",
@@ -168,6 +169,10 @@ def load_manifest(scene: bpy.types.Scene, manifest_path: Path) -> None:
         profile = str(projection_data.get("profile", ""))
         if profile != projection.PROFILE_NAME:
             raise RuntimeError(f"Unsupported projection profile: {profile or 'missing'}")
+        density = float(projection_data.get("pixels_per_unit", projection.LEGACY_PIXELS_PER_UNIT))
+        if not math.isfinite(density) or density <= 0:
+            raise RuntimeError("Projection pixels per unit must be positive and finite")
+        state.projection_pixels_per_unit = density
         collection_name = str(projection_data.get("collection", ""))
         material_name = str(projection_data.get("material", ""))
         image_name = str(projection_data.get("image", ""))

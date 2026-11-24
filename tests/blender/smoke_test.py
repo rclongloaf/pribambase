@@ -81,6 +81,9 @@ def main() -> None:
         assert not hasattr(state, "detail_preview_mode")
         projection = importlib.import_module(f"{ADDON_MODULE_NAME}.projection")
         scene = bpy.context.scene
+        density = projection.pixels_per_unit(scene)
+        assert density == 32
+        assert projection.project_world_point(Vector((1, 0, 0)), density) == (32, 0)
         cube = bpy.data.objects["Cube"]
         scene.frame_start = 1
         scene.frame_end = 2
@@ -93,7 +96,7 @@ def main() -> None:
         scene.frame_set(1)
 
         canvas = projection.calculate_animation_layout(scene)
-        assert canvas.width >= 84, "Canvas did not include the largest animation frame"
+        assert canvas.width >= 132, "Canvas did not include the largest animation frame at 32 px/unit"
         assert canvas.min_x <= 0 <= canvas.max_x
         assert canvas.min_y <= 0 <= canvas.max_y
         projection.set_state_layout(scene, canvas)
@@ -389,10 +392,10 @@ def main() -> None:
             ((canvas.min_x, canvas.min_y), (0.0, 0.0)),
             ((canvas.max_x, canvas.max_y), (1.0, 1.0)),
         ):
-            projected_y = pixel[1] / projection.PIXELS_PER_UNIT
+            projected_y = pixel[1] / density
             point = Vector(
                 (
-                    pixel[0] / projection.PIXELS_PER_UNIT,
+                    pixel[0] / density,
                     projected_y * math.sin(projection.PROJECTION_ELEVATION),
                     projected_y * math.cos(projection.PROJECTION_ELEVATION),
                 )

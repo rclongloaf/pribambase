@@ -156,6 +156,7 @@ def main() -> None:
 
     from pribambase import projection, workspace
 
+    scene.sb_state.projection_pixels_per_unit = projection.LEGACY_PIXELS_PER_UNIT
     projection.set_state_layout(scene, projection.centered_layout(size, size))
     material = projection.ensure_project_material(scene, image)
     projection.assign_project_material(scene, material)

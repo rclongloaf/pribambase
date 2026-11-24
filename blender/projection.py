@@ -12,7 +12,8 @@ from mathutils import Vector
 
 
 PROFILE_NAME = "global_iso_v1"
-PIXELS_PER_UNIT = 20.0
+PIXELS_PER_METER = 32.0
+LEGACY_PIXELS_PER_UNIT = 20.0
 PROJECTION_ELEVATION = math.radians(30.0)
 CAMERA_ROTATION_X = math.radians(60.0)
 CAMERA_DISTANCE = 20.0
@@ -61,6 +62,21 @@ def is_scanning() -> bool:
     return _scanning
 
 
+def meters_per_unit(scene: bpy.types.Scene) -> float:
+    units = scene.unit_settings
+    return units.scale_length if units.system != 'NONE' else 1.0
+
+
+def pixels_per_unit(scene: bpy.types.Scene) -> float:
+    state = scene.sb_state
+    if state.projection_pixels_per_unit > 0:
+        return state.projection_pixels_per_unit
+    # Older canvases and materials were painted on a fixed 20 px/unit grid.
+    if state.projection_canvas_ready or state.projection_material is not None:
+        return LEGACY_PIXELS_PER_UNIT
+    return PIXELS_PER_METER * meters_per_unit(scene)
+
+
 def state_layout(scene: bpy.types.Scene) -> Layout | None:
     state = scene.sb_state
     if not state.projection_canvas_ready:
@@ -76,6 +92,7 @@ def state_layout(scene: bpy.types.Scene) -> Layout | None:
 
 def set_state_layout(scene: bpy.types.Scene, layout: Layout) -> None:
     state = scene.sb_state
+    state.projection_pixels_per_unit = pixels_per_unit(scene)
     state.projection_min_x = layout.min_x
     state.projection_min_y = layout.min_y
     state.projection_max_x = layout.max_x
@@ -97,24 +114,21 @@ def projection_objects(scene: bpy.types.Scene) -> tuple[bpy.types.Object, ...]:
     )
 
 
-def project_world_point(point: Vector) -> tuple[float, float]:
+def project_world_point(point: Vector, density: float) -> tuple[float, float]:
     return (
-        point.x * PIXELS_PER_UNIT,
+        point.x * density,
         (
             point.y * math.sin(PROJECTION_ELEVATION)
             + point.z * math.cos(PROJECTION_ELEVATION)
         )
-        * PIXELS_PER_UNIT,
+        * density,
     )
 
 
 def calculate_animation_layout(scene: bpy.types.Scene) -> Layout:
     global _scanning
-    objects = projection_objects(scene)
-    if not objects:
-        raise RuntimeError("Projection collection does not contain renderable mesh objects")
-
     original_frame = scene.frame_current
+    density = pixels_per_unit(scene)
     min_x = min_y = math.inf
     max_x = max_y = -math.inf
     _scanning = True
@@ -122,13 +136,13 @@ def calculate_animation_layout(scene: bpy.types.Scene) -> Layout:
         for frame in range(scene.frame_start, scene.frame_end + 1):
             scene.frame_set(frame)
             depsgraph = bpy.context.evaluated_depsgraph_get()
-            for obj in objects:
+            for obj in projection_objects(scene):
                 evaluated = obj.evaluated_get(depsgraph)
                 mesh = evaluated.to_mesh()
                 try:
                     matrix = evaluated.matrix_world
                     for vertex in mesh.vertices:
-                        x, y = project_world_point(matrix @ vertex.co)
+                        x, y = project_world_point(matrix @ vertex.co, density)
                         min_x = min(min_x, x)
                         min_y = min(min_y, y)
                         max_x = max(max_x, x)
@@ -141,7 +155,7 @@ def calculate_animation_layout(scene: bpy.types.Scene) -> Layout:
         _scanning = False
 
     if not math.isfinite(min_x):
-        raise RuntimeError("Could not evaluate projection bounds")
+        raise RuntimeError("No renderable mesh geometry across the animation")
 
     padding = scene.sb_state.projection_padding
     # World zero is the stable pivot and must remain inside the shared canvas.
@@ -206,12 +220,15 @@ def _new_group_socket(tree, name: str, in_out: str, socket_type: str):
     return tree.interface.new_socket(name=name, in_out=in_out, socket_type=socket_type)
 
 
-def ensure_projection_group() -> bpy.types.ShaderNodeTree:
-    existing = bpy.data.node_groups.get(PROJECTION_GROUP_NAME)
+def ensure_projection_group(density: float) -> bpy.types.ShaderNodeTree:
+    name = PROJECTION_GROUP_NAME
+    if density != LEGACY_PIXELS_PER_UNIT:
+        name = f"{name}_{density:.9g}"
+    existing = bpy.data.node_groups.get(name)
     if existing is not None:
         return existing
 
-    tree = bpy.data.node_groups.new(PROJECTION_GROUP_NAME, 'ShaderNodeTree')
+    tree = bpy.data.node_groups.new(name, 'ShaderNodeTree')
     for name in ("Canvas Min X", "Canvas Min Y", "Canvas Width", "Canvas Height"):
         socket = _new_group_socket(tree, name, 'INPUT', 'NodeSocketFloat')
         socket.default_value = 1.0 if name in {"Canvas Width", "Canvas Height"} else 0.0
@@ -225,7 +242,7 @@ def ensure_projection_group() -> bpy.types.ShaderNodeTree:
     separate = nodes.new('ShaderNodeSeparateXYZ')
     x_scale = nodes.new('ShaderNodeMath')
     x_scale.operation = 'MULTIPLY'
-    x_scale.inputs[1].default_value = PIXELS_PER_UNIT
+    x_scale.inputs[1].default_value = density
     x_offset = nodes.new('ShaderNodeMath')
     x_offset.operation = 'SUBTRACT'
     x_normalize = nodes.new('ShaderNodeMath')
@@ -233,10 +250,10 @@ def ensure_projection_group() -> bpy.types.ShaderNodeTree:
 
     y_scale = nodes.new('ShaderNodeMath')
     y_scale.operation = 'MULTIPLY'
-    y_scale.inputs[1].default_value = PIXELS_PER_UNIT * math.sin(PROJECTION_ELEVATION)
+    y_scale.inputs[1].default_value = density * math.sin(PROJECTION_ELEVATION)
     z_scale = nodes.new('ShaderNodeMath')
     z_scale.operation = 'MULTIPLY'
-    z_scale.inputs[1].default_value = PIXELS_PER_UNIT * math.cos(PROJECTION_ELEVATION)
+    z_scale.inputs[1].default_value = density * math.cos(PROJECTION_ELEVATION)
     projected_y = nodes.new('ShaderNodeMath')
     projected_y.operation = 'ADD'
     y_offset = nodes.new('ShaderNodeMath')
@@ -264,6 +281,7 @@ def ensure_projection_group() -> bpy.types.ShaderNodeTree:
     links.new(y_normalize.outputs[0], combine.inputs['Y'])
     links.new(combine.outputs['Vector'], group_output.inputs['Vector'])
     tree["pribambase_profile"] = PROFILE_NAME
+    tree["pribambase_pixels_per_unit"] = density
     return tree
 
 
@@ -484,6 +502,8 @@ def ensure_project_material(
     image: bpy.types.Image,
 ) -> bpy.types.Material:
     state = scene.sb_state
+    density = pixels_per_unit(scene)
+    state.projection_pixels_per_unit = density
     state.projection_image = image
     material = state.projection_material
     if material is None:
@@ -525,7 +545,7 @@ def ensure_project_material(
     separate.location = (150, -180)
     separate["pribambase_role"] = "orme-separate"
     projection = nodes.new('ShaderNodeGroup')
-    projection.node_tree = ensure_projection_group()
+    projection.node_tree = ensure_projection_group(density)
     projection.location = (-300, 80)
     projection["pribambase_role"] = "projection"
     normal_texture = nodes.new('ShaderNodeTexImage')
@@ -588,6 +608,7 @@ def update_project_material(scene: bpy.types.Scene) -> None:
     material = scene.sb_state.projection_material
     if material is None:
         return
+    density = pixels_per_unit(scene)
     if (
         material.get("pribambase_material_schema") != PROJECT_MATERIAL_SCHEMA
         or not material.use_nodes
@@ -595,6 +616,12 @@ def update_project_material(scene: bpy.types.Scene) -> None:
             node.get("pribambase_role") == "master"
             and node.node_tree is not None
             and node.node_tree.get("pribambase_material_schema") == MASTER_GROUP_SCHEMA
+            for node in material.node_tree.nodes
+        )
+        or not any(
+            node.get("pribambase_role") == "projection"
+            and node.node_tree is not None
+            and node.node_tree.get("pribambase_pixels_per_unit", LEGACY_PIXELS_PER_UNIT) == density
             for node in material.node_tree.nodes
         )
     ):
@@ -645,8 +672,9 @@ def apply_projection_camera(scene: bpy.types.Scene, camera_object: bpy.types.Obj
     if camera_object.type != 'CAMERA':
         raise RuntimeError("Projection view requires a camera object")
 
-    center_x = (layout.min_x + layout.max_x) / (2.0 * PIXELS_PER_UNIT)
-    center_y = (layout.min_y + layout.max_y) / (2.0 * PIXELS_PER_UNIT)
+    density = pixels_per_unit(scene)
+    center_x = (layout.min_x + layout.max_x) / (2.0 * density)
+    center_y = (layout.min_y + layout.max_y) / (2.0 * density)
     up = Vector((0.0, math.sin(PROJECTION_ELEVATION), math.cos(PROJECTION_ELEVATION)))
     camera_axis = Vector((0.0, -math.cos(PROJECTION_ELEVATION), math.sin(PROJECTION_ELEVATION)))
     target = Vector((center_x, 0.0, 0.0)) + up * center_y
@@ -657,7 +685,7 @@ def apply_projection_camera(scene: bpy.types.Scene, camera_object: bpy.types.Obj
     # Blender applies ortho_scale to the fitted (wider or taller) sensor axis.
     # Using the larger canvas dimension keeps one world pixel exactly aligned
     # with one render pixel for both landscape and portrait canvases.
-    camera_object.data.ortho_scale = max(layout.width, layout.height) / PIXELS_PER_UNIT
+    camera_object.data.ortho_scale = max(layout.width, layout.height) / density
     camera_object.data.shift_x = 0.0
     camera_object.data.shift_y = 0.0
     camera_object.data.clip_start = 0.01

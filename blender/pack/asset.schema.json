@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Rusted Bloom prop (.rbprop)",
+  "description": "UTF-8 JSON. Meshes, textures, and atlas pages are assigned in Unity.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "frames": {
+      "type": "array",
+      "description": "Frames in playback order. The sequence loops. Omit for a static prop.",
+      "minItems": 2,
+      "items": { "$ref": "#/$defs/frame" }
+    }
+  },
+  "$defs": {
+    "frame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["durationMs", "rects"],
+      "properties": {
+        "durationMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "meshSlot": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$",
+          "description": "Key of a mesh assignment in Unity. Omit to use the main mesh."
+        },
+        "rects": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["baseColor", "orm", "worldNormal"],
+          "properties": {
+            "baseColor": { "$ref": "#/$defs/atlasRect" },
+            "orm": { "$ref": "#/$defs/atlasRect" },
+            "worldNormal": { "$ref": "#/$defs/atlasRect" },
+            "emission": {
+              "$ref": "#/$defs/atlasRect",
+              "description": "Omit to disable emission for this frame."
+            }
+          }
+        },
+        "offsetM": {
+          "type": "object",
+          "description": "Offset from the first pose along Unity axes, in meters. Omit for zero offset.",
+          "additionalProperties": false,
+          "required": ["x", "y", "z"],
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "z": { "type": "number" }
+          }
+        }
+      }
+    },
+    "atlasRect": {
+      "type": "array",
+      "description": "[page, x, y, width, height]. Page is a zero-based index into the Unity atlas pages for this channel. Pixel origin is top-left. The rectangle excludes gutters.",
+      "minItems": 5,
+      "prefixItems": [
+        { "type": "integer", "minimum": 0 },
+        { "type": "integer", "minimum": 0 },
+        { "type": "integer", "minimum": 0 },
+        { "type": "integer", "minimum": 1 },
+        { "type": "integer", "minimum": 1 }
+      ],
+      "items": false
+    }
+  }
+}

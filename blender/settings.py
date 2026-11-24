@@ -58,6 +58,13 @@ class SB_State(bpy.types.PropertyGroup):
         options={'PATH_SUPPORTS_BLEND_RELATIVE'},
     )
 
+    pack_output_directory: bpy.props.StringProperty(
+        name="Export Folder",
+        description="Choose the parent folder for prop packs before exporting",
+        subtype='DIR_PATH',
+        options={'PATH_SUPPORTS_BLEND_RELATIVE'},
+    )
+
     guide_layer: bpy.props.StringProperty(
         name="Projection Layer",
         description="Reference layer updated by automatic Blender projections",
@@ -149,6 +156,7 @@ class SB_State(bpy.types.PropertyGroup):
         default=True,
     )
 
+    projection_pixels_per_unit: bpy.props.FloatProperty(default=0.0, options={'HIDDEN'})
     projection_canvas_ready: bpy.props.BoolProperty(default=False, options={'HIDDEN'})
     projection_bounds_dirty: bpy.props.BoolProperty(default=True, options={'HIDDEN'})
     projection_min_x: bpy.props.IntProperty(default=0, options={'HIDDEN'})

@@ -256,12 +256,12 @@ def generate_default(scene, frame=None, *, send=False, force=False):
     )
     if needs_bake:
         original_frame = scene.frame_current
-        for mode in REFERENCE_MODES:
-            smooth = mode == "SMOOTH"
-            with _normal_bake_context(scene, _geometry_bake_material(smooth), smooth=smooth):
-                try:
-                    if scene.frame_current != target:
-                        scene.frame_set(target)
+        try:
+            if scene.frame_current != target:
+                scene.frame_set(target)
+            for mode in REFERENCE_MODES:
+                smooth = mode == "SMOOTH"
+                with _normal_bake_context(scene, _geometry_bake_material(smooth), smooth=smooth):
                     with projection.projection_render_context(scene):
                         scene.render.film_transparent = True
                         raw, actual = _render_float_pixels(scene)
@@ -272,9 +272,9 @@ def generate_default(scene, frame=None, *, send=False, force=False):
                     image.pixels.foreach_set(pixels.ravel())
                     image.update()
                     _pack_image(image)
-                finally:
-                    if scene.frame_current != original_frame:
-                        scene.frame_set(original_frame)
+        finally:
+            if scene.frame_current != original_frame:
+                scene.frame_set(original_frame)
         _dirty.discard(key)
         projection.update_project_material(scene)
     if send:

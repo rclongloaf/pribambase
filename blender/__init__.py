@@ -41,7 +41,9 @@ def check_vendor_complete():
     if not os.path.exists(vendor_path):
         return False
 
-    required_packages = ["aiohttp", "multidict", "yarl", "attrs", "frozenlist", "async_timeout"]
+    required_packages = ["aiohttp", "multidict", "yarl", "attrs", "frozenlist"]
+    if sys.version_info < (3, 11):
+        required_packages.append("async_timeout")
     for pkg in required_packages:
         pkg_path = os.path.join(vendor_path, pkg)
         if not os.path.exists(pkg_path):
@@ -164,6 +166,7 @@ from .settings import *
 from .sync import *
 from .ui_3d import *
 from .normals import *
+from .pack_export import SB_OT_export_pack
 from . import projection
 from . import normals
 from . import workspace
@@ -194,6 +197,7 @@ classes = (
     SB_OT_pair_save,
     SB_OT_pair_load,
     SB_OT_pair_open_sprite,
+    SB_OT_export_pack,
     SB_OT_projection_current,
     SB_OT_projection_dirty,
     SB_OT_projection_recalculate,
@@ -223,9 +227,10 @@ def register():
         options={'PATH_SUPPORTS_BLEND_RELATIVE'},
     )
 
-    for scene in bpy.data.scenes:
-        normals.migrate_scene(scene)
-    repair_project_material()
+    # Blender restricts scene access while enabling add-ons. start() repairs the
+    # material once that context is released.
+    if hasattr(bpy.data, "scenes"):
+        repair_project_material()
 
     # delay is just in case something else happens at startup
     # `persistent` protects the timer if the user loads a file before it fires
